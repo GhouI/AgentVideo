@@ -1,53 +1,112 @@
-/**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
- */
-
 import { Platform } from 'react-native';
-
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
 
 export const Colors = {
   light: {
-    text: '#11181C',
-    background: '#fff',
-    tint: tintColorLight,
-    icon: '#687076',
-    tabIconDefault: '#687076',
-    tabIconSelected: tintColorLight,
+    background: 'rgb(255, 255, 255)',
+    foreground: 'rgb(17, 24, 39)',
+    card: 'rgb(255, 255, 255)',
+    cardForeground: 'rgb(17, 24, 39)',
+    popover: 'rgb(255, 255, 255)',
+    popoverForeground: 'rgb(17, 24, 39)',
+    primary: 'rgb(216, 121, 67)',
+    primaryForeground: 'rgb(255, 255, 255)',
+    secondary: 'rgb(82, 117, 117)',
+    secondaryForeground: 'rgb(255, 255, 255)',
+    muted: 'rgb(243, 244, 246)',
+    mutedForeground: 'rgb(107, 114, 128)',
+    accent: 'rgb(238, 238, 238)',
+    accentForeground: 'rgb(17, 24, 39)',
+    destructive: 'rgb(239, 68, 68)',
+    destructiveForeground: 'rgb(250, 250, 250)',
+    border: 'rgb(229, 231, 235)',
+    input: 'rgb(229, 231, 235)',
+    ring: 'rgb(216, 121, 67)',
+    text: 'rgb(17, 24, 39)',
+    tint: 'rgb(216, 121, 67)',
+    icon: 'rgb(107, 114, 128)',
+    tabIconDefault: 'rgb(107, 114, 128)',
+    tabIconSelected: 'rgb(216, 121, 67)',
+    sidebar: 'rgb(243, 244, 246)',
+    sidebarForeground: 'rgb(17, 24, 39)',
+    sidebarPrimary: 'rgb(216, 121, 67)',
+    sidebarPrimaryForeground: 'rgb(255, 255, 255)',
+    sidebarAccent: 'rgb(255, 255, 255)',
+    sidebarAccentForeground: 'rgb(17, 24, 39)',
+    sidebarBorder: 'rgb(229, 231, 235)',
+    sidebarRing: 'rgb(216, 121, 67)',
   },
   dark: {
-    text: '#ECEDEE',
-    background: '#151718',
-    tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
-    tabIconSelected: tintColorDark,
+    background: 'rgb(18, 17, 19)',
+    foreground: 'rgb(193, 193, 193)',
+    card: 'rgb(18, 18, 18)',
+    cardForeground: 'rgb(193, 193, 193)',
+    popover: 'rgb(18, 17, 19)',
+    popoverForeground: 'rgb(193, 193, 193)',
+    primary: 'rgb(231, 138, 83)',
+    primaryForeground: 'rgb(18, 17, 19)',
+    secondary: 'rgb(95, 135, 135)',
+    secondaryForeground: 'rgb(18, 17, 19)',
+    muted: 'rgb(34, 34, 34)',
+    mutedForeground: 'rgb(136, 136, 136)',
+    accent: 'rgb(51, 51, 51)',
+    accentForeground: 'rgb(193, 193, 193)',
+    destructive: 'rgb(95, 135, 135)',
+    destructiveForeground: 'rgb(18, 17, 19)',
+    border: 'rgb(34, 34, 34)',
+    input: 'rgb(34, 34, 34)',
+    ring: 'rgb(231, 138, 83)',
+    text: 'rgb(193, 193, 193)',
+    tint: 'rgb(231, 138, 83)',
+    icon: 'rgb(136, 136, 136)',
+    tabIconDefault: 'rgb(136, 136, 136)',
+    tabIconSelected: 'rgb(231, 138, 83)',
+    sidebar: 'rgb(18, 18, 18)',
+    sidebarForeground: 'rgb(193, 193, 193)',
+    sidebarPrimary: 'rgb(231, 138, 83)',
+    sidebarPrimaryForeground: 'rgb(18, 17, 19)',
+    sidebarAccent: 'rgb(51, 51, 51)',
+    sidebarAccentForeground: 'rgb(193, 193, 193)',
+    sidebarBorder: 'rgb(34, 34, 34)',
+    sidebarRing: 'rgb(231, 138, 83)',
   },
+};
+
+export const Spacing = {
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 24,
+  xxl: 32,
+};
+
+export const BorderRadius = {
+  sm: 8,
+  md: 10,
+  lg: 12,
+  xl: 16,
+  full: 9999,
 };
 
 export const Fonts = Platform.select({
   ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
-    sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
-    serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
-    rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
-    mono: 'ui-monospace',
+    sans: 'System',
+    serif: 'Georgia',
+    mono: 'Menlo',
+  },
+  android: {
+    sans: 'Roboto',
+    serif: 'serif',
+    mono: 'monospace',
   },
   default: {
-    sans: 'normal',
+    sans: 'System',
     serif: 'serif',
-    rounded: 'normal',
     mono: 'monospace',
   },
   web: {
-    sans: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+    sans: "Geist Mono, ui-monospace, monospace",
     serif: "Georgia, 'Times New Roman', serif",
-    rounded: "'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Meiryo, 'MS PGothic', sans-serif",
-    mono: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+    mono: "JetBrains Mono, monospace",
   },
 });
