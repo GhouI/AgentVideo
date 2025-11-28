@@ -1,5 +1,6 @@
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import {runCactus} from '@/utils/cactus';
 import {
   ArrowLeft,
   ArrowUp,
@@ -44,6 +45,9 @@ export default function EditScreen() {
   };
 
   const handleSubmitPrompt = () => {
+    alert("running cactus");
+    const result = runCactus();
+    alert(result)
     if (prompt.trim()) {
       // Process the prompt
       console.log('Processing prompt:', prompt);
