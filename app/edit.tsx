@@ -2,26 +2,26 @@ import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {runCactus} from '@/utils/cactus';
 import {
-  ArrowLeft,
-  ArrowUp,
-  Mic,
-  Pause,
-  Play,
-  Sparkles,
+    ArrowLeft,
+    ArrowUp,
+    Mic,
+    Pause,
+    Play,
+    Sparkles,
 } from 'lucide-react-native';
 import React, { useState } from 'react';
 import {
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
+    KeyboardAvoidingView,
+    Platform,
+    Pressable,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Colors, BorderRadius, Spacing } from '@/constants/theme';
+import { BorderRadius, Colors, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
 export default function EditScreen() {
