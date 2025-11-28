@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Video Editing Interface</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "primary": "#137fec",
+            "background-light": "#f6f7f8",
+            "background-dark": "#101922",
+          },
+          fontFamily: {
+            "display": ["Space Grotesk"]
+          },
+          borderRadius: {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+        },
+      },
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings:
+        'FILL' 0,
+        'wght' 400,
+        'GRAD' 0,
+        'opsz' 24
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="font-display">
+<div class="relative flex h-auto min-h-screen w-full flex-col bg-background-light dark:bg-background-dark group/design-root overflow-x-hidden">
+<header class="flex shrink-0 items-center bg-background-light dark:bg-background-dark p-4 pb-2 justify-between sticky top-0 z-10">
+<div class="flex w-12 items-center">
+<button class="flex max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-12 bg-transparent text-black dark:text-white gap-2 text-base font-bold leading-normal tracking-[0.015em] min-w-0 p-0">
+<span class="material-symbols-outlined text-black dark:text-white text-2xl">arrow_back_ios_new</span>
+</button>
+</div>
+<h1 class="text-black dark:text-white text-lg font-bold leading-tight tracking-[-0.015em] flex-1 text-center">LA Trip Highlights</h1>
+<div class="flex w-12 items-center justify-end">
+<button class="flex max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-12 bg-transparent text-primary gap-2 text-base font-bold leading-normal tracking-[0.015em] min-w-0 p-0">
+<span class="truncate text-base font-bold leading-normal tracking-[0.015em]">Export</span>
+</button>
+</div>
+</header>
+<main class="flex-1 flex flex-col">
+<div class="flex-1 flex items-center justify-center p-4">
+<div class="w-full bg-center bg-no-repeat aspect-video bg-cover rounded-xl bg-neutral-200 dark:bg-neutral-800" style='background-image: url("https://lh3.googleusercontent.com/aida-public/AB6AXuAoRV4D9aMqgjUxHWN01ihboFopthvIABxmf-oktulGmTS6rxdkcR3M1zeb4aryfWFzljNBI0Gzukt1CEwEFkasXjN6y0IzhFh6iE8tfYc37T9e_GMJ-K6B7DXGEAxeKOI9NBsvyMUto1hDqArf9szQzDiAvYv6Rvr-0AB7n66-R8BS_0JP8rO4aW_xJtN3YyvtKLO-DZlQoiJUh9Cfj5a_tlLT250sqoyP_8m66KP8JWObUJYIuNeZtZ3s5fJdVO8X8uRbgUDtEXw");'>
+<div class="flex items-center justify-center h-full">
+<button class="flex items-center justify-center bg-black/50 text-white rounded-full size-16">
+<span class="material-symbols-outlined text-4xl" style="font-size: 48px;">play_arrow</span>
+</button>
+</div>
+</div>
+</div>
+</main>
+<footer class="sticky bottom-0 left-0 right-0 bg-background-light/80 dark:bg-background-dark/80 backdrop-blur-lg">
+<div class="flex items-center gap-2 p-4 pt-2">
+<input class="w-full rounded-full border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-black dark:text-white placeholder:text-neutral-500 dark:placeholder:text-neutral-400 focus:border-primary focus:ring-primary h-12 text-base" placeholder="Describe your edit..." type="text"/>
+<button class="flex shrink-0 max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-full h-12 w-12 bg-primary text-white shadow-lg">
+<span class="material-symbols-outlined text-white text-2xl">auto_awesome</span>
+</button>
+</div>
+</footer>
+</div>
+
+</body></html>
