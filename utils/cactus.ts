@@ -422,22 +422,27 @@ export async function initializeCactus(callbacks?: CactusInitCallbacks): Promise
   }
 
   try {
-    cactusInstance = new CactusLM();
+    // Use qwen3-1.7 model specifically
+    cactusInstance = new CactusLM({ model: 'qwen3-1.7b' });
     
     // Check if model needs downloading
     const models = await cactusInstance.getModels();
     console.log('[Cactus] Available models:', models.map(m => ({ name: m.name, supportsToolCalling: m.supportsToolCalling, isDownloaded: m.isDownloaded, sizeMb: m.sizeMb })));
     
+    // Look for qwen3 model specifically
+    const qwenModel = models.find(m => m.name.toLowerCase().includes('qwen3') || m.name.toLowerCase().includes('qwen-3'));
     const toolCallingModels = models.filter(m => m.supportsToolCalling);
     console.log('[Cactus] Tool-calling models:', toolCallingModels.map(m => m.name));
     
-    // Find a small tool-calling model that's downloaded or download one
-    let selectedModel = toolCallingModels.find(m => m.isDownloaded);
+    // Prefer qwen3-1.7b, fall back to any downloaded tool-calling model
+    let selectedModel = qwenModel || toolCallingModels.find(m => m.isDownloaded);
     
     if (!selectedModel && toolCallingModels.length > 0) {
-      // Download the smallest tool-calling model
-      const sortedBySize = toolCallingModels.sort((a, b) => a.sizeMb - b.sizeMb);
-      selectedModel = sortedBySize[0];
+      // Try to find qwen or download smallest
+      selectedModel = toolCallingModels.find(m => m.name.toLowerCase().includes('qwen')) || toolCallingModels.sort((a, b) => a.sizeMb - b.sizeMb)[0];
+    }
+    
+    if (selectedModel && !selectedModel.isDownloaded) {
       console.log('[Cactus] Will download model:', selectedModel.name);
       
       isDownloading = true;
@@ -454,7 +459,7 @@ export async function initializeCactus(callbacks?: CactusInitCallbacks): Promise
       callbacks?.onDownloadComplete?.();
     }
 
-    console.log('[Cactus] Selected model:', selectedModel?.name || 'default');
+    console.log('[Cactus] Selected model:', selectedModel?.name || 'qwen3-1.7b');
     
     await cactusInstance.init();
     isInitialized = true;
