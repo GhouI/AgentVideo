@@ -6,8 +6,9 @@ import {
   Globe,
   LogOut,
   Moon,
-  SunMedium,
   Shield,
+  Sparkles,
+  SunMedium,
   User,
 } from 'lucide-react-native';
 import React from 'react';
@@ -30,9 +31,11 @@ import {
   downloadModel,
   getAvailableModels,
   getCactusDownloadProgress,
+  getSelectedModel,
   hasDownloadedModel,
   isCactusDownloading,
   isCactusReady,
+  setSelectedModel,
 } from '@/utils/cactus';
 
 interface SettingItem {
@@ -53,6 +56,7 @@ export default function SettingsScreen() {
   const { theme, setTheme } = useAppSettings();
   const [modelStatus, setModelStatus] = React.useState<ModelStatus>('checking');
   const [modelProgress, setModelProgress] = React.useState(0);
+  const [selectedModelName, setSelectedModelName] = React.useState<string>('Auto');
 
   React.useEffect(() => {
     let isActive = true;
@@ -76,6 +80,16 @@ export default function SettingsScreen() {
         if (!isActive) return;
         setModelStatus(downloaded ? 'ready' : 'idle');
         setModelProgress(downloaded ? 100 : 0);
+        
+        // Load selected model name
+        const selectedSlug = getSelectedModel();
+        if (selectedSlug) {
+          const models = await getAvailableModels();
+          const selected = models.find(m => m.slug === selectedSlug);
+          if (selected) {
+            setSelectedModelName(selected.name);
+          }
+        }
       } catch {
         if (isActive) {
           setModelStatus('error');
@@ -124,6 +138,13 @@ export default function SettingsScreen() {
       icon: <Download size={22} color={colors.secondary} />,
       title: 'Download Model',
       subtitle: 'Install the AI model for local editing',
+      type: 'action',
+    },
+    {
+      id: 'selectModel',
+      icon: <Sparkles size={22} color={colors.secondary} />,
+      title: 'Active Model',
+      subtitle: selectedModelName,
       type: 'action',
     },
     {
@@ -242,9 +263,43 @@ export default function SettingsScreen() {
     }
   };
 
+  const handleSelectModel = async () => {
+    try {
+      const models = await getAvailableModels();
+      const downloadedModels = models.filter(m => m.supportsToolCalling && m.isDownloaded);
+      
+      if (downloadedModels.length === 0) {
+        Alert.alert('No Models', 'Please download a model first.');
+        return;
+      }
+      
+      // Show selection dialog
+      Alert.alert(
+        'Select Active Model',
+        'Choose which model to use for editing:',
+        [
+          ...downloadedModels.map(model => ({
+            text: `${model.name} (${model.sizeMb}MB)`,
+            onPress: () => {
+              setSelectedModel(model.slug);
+              setSelectedModelName(model.name);
+              Alert.alert('Model Selected', `Now using ${model.name}. Restart the app for changes to take effect.`);
+            },
+          })),
+          { text: 'Cancel', style: 'cancel' as const },
+        ]
+      );
+    } catch (error) {
+      console.error('Failed to get models:', error);
+      Alert.alert('Error', 'Failed to load models');
+    }
+  };
+
   const handleAction = async (id: string) => {
     if (id === 'downloadModel') {
       await handleDownloadModel();
+    } else if (id === 'selectModel') {
+      await handleSelectModel();
     } else if (id === 'logout') {
       Alert.alert('Log Out', 'Logging out is not implemented yet.');
     }

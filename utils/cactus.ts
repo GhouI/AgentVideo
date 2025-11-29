@@ -422,19 +422,37 @@ export async function initializeCactus(callbacks?: CactusInitCallbacks): Promise
   }
 
   try {
-    // Simple initialization - just use default model
-    cactusInstance = new CactusLM();
-    
     console.log('[Cactus] Checking for downloaded models...');
     
-    // Check if we need to download
-    const models = await cactusInstance.getModels();
-    const downloadedModel = models.find(m => m.isDownloaded && m.supportsToolCalling);
+    // Check available models
+    const tempInstance = new CactusLM();
+    const models = await tempInstance.getModels();
+    const downloadedModels = models.filter(m => m.isDownloaded && m.supportsToolCalling);
     
-    console.log('[Cactus] Downloaded tool-calling model:', downloadedModel?.name || 'none');
+    console.log('[Cactus] Downloaded models:', downloadedModels.map(m => ({ name: m.name, slug: (m as any).slug })));
     
-    if (!downloadedModel) {
-      // Need to download - get smallest tool-calling model
+    // Use selected model or first downloaded model
+    let modelToUse = null;
+    if (selectedModelSlug) {
+      modelToUse = downloadedModels.find(m => (m as any).slug === selectedModelSlug);
+      console.log('[Cactus] Using selected model:', modelToUse?.name || 'not found, will use default');
+    }
+    
+    if (!modelToUse && downloadedModels.length > 0) {
+      modelToUse = downloadedModels[0];
+      console.log('[Cactus] Using first downloaded model:', modelToUse.name);
+    }
+    
+    // Create instance with specific model if available
+    if (modelToUse) {
+      const slug = (modelToUse as any).slug;
+      console.log('[Cactus] Initializing with slug:', slug);
+      cactusInstance = new CactusLM({ model: slug });
+    } else {
+      // No model downloaded - need to download
+      console.log('[Cactus] No downloaded models, need to download first');
+      cactusInstance = new CactusLM();
+      
       const toolCallingModels = models.filter(m => m.supportsToolCalling);
       if (toolCallingModels.length > 0) {
         const smallest = toolCallingModels.sort((a, b) => a.sizeMb - b.sizeMb)[0];
@@ -588,6 +606,18 @@ export async function getAvailableModels(): Promise<Array<{
 
 export function isCactusDownloading(): boolean {
   return isDownloading;
+}
+
+// Get/Set selected model preference
+let selectedModelSlug: string | null = null;
+
+export function getSelectedModel(): string | null {
+  return selectedModelSlug;
+}
+
+export function setSelectedModel(slug: string | null): void {
+  selectedModelSlug = slug;
+  console.log('[Cactus] Selected model set to:', slug);
 }
 
 export interface ChatMessage {
