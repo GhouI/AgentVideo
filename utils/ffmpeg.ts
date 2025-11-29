@@ -1,6 +1,6 @@
-import { FFmpegKit, FFprobeKit, ReturnCode } from 'ffmpeg-kit-react-native';
 import * as FileSystem from 'expo-file-system';
 import { getInputDir, getOutputDir, getThumbnailsDir } from './project-storage';
+import { executeFFmpeg, getVideoInfoRaw } from './ffmpeg-exec';
 
 export interface VideoInfo {
   duration: number; // in seconds
@@ -23,14 +23,12 @@ export interface FFmpegResult {
 // Execute a raw ffmpeg command
 export async function executeFFmpegCommand(command: string): Promise<FFmpegResult> {
   try {
-    const session = await FFmpegKit.execute(command);
-    const returnCode = await session.getReturnCode();
-    
-    if (ReturnCode.isSuccess(returnCode)) {
+    const result = await executeFFmpeg(command);
+
+    if (result.success) {
       return { success: true };
     } else {
-      const logs = await session.getAllLogsAsString();
-      return { success: false, error: logs || 'FFmpeg command failed' };
+      return { success: false, error: result.error || result.stderr || 'FFmpeg command failed' };
     }
   } catch (error) {
     return { success: false, error: String(error) };
@@ -40,28 +38,38 @@ export async function executeFFmpegCommand(command: string): Promise<FFmpegResul
 // Get video information using ffprobe
 export async function getVideoInfo(filePath: string): Promise<VideoInfo | null> {
   try {
-    const session = await FFprobeKit.getMediaInformation(filePath);
-    const info = session.getMediaInformation();
-    
-    if (!info) {
+    const info = await getVideoInfoRaw(filePath);
+
+    if (!info || !info.streams) {
       return null;
     }
-    
-    const videoStream = info.getStreams()?.find(s => s.getType() === 'video');
-    const audioStream = info.getStreams()?.find(s => s.getType() === 'audio');
-    
-    const duration = parseFloat(String(info.getDuration() ?? '0'));
-    const bitrate = parseInt(info.getBitrate() || '0', 10);
-    
+
+    const videoStream = info.streams.find((s: any) => s.codec_type === 'video');
+    const audioStream = info.streams.find((s: any) => s.codec_type === 'audio');
+
+    const duration = parseFloat(info.format?.duration || '0');
+    const bitrate = parseInt(info.format?.bit_rate || '0', 10);
+
+    // Parse frame rate from string like "30/1" or "29.97"
+    let fps = 30;
+    if (videoStream?.r_frame_rate) {
+      const parts = videoStream.r_frame_rate.split('/');
+      if (parts.length === 2) {
+        fps = parseFloat(parts[0]) / parseFloat(parts[1]);
+      } else {
+        fps = parseFloat(videoStream.r_frame_rate);
+      }
+    }
+
     return {
       duration,
-      width: videoStream?.getWidth() || 0,
-      height: videoStream?.getHeight() || 0,
+      width: videoStream?.width || 0,
+      height: videoStream?.height || 0,
       bitrate,
-      codec: videoStream?.getCodec() || 'unknown',
-      fps: parseFloat(videoStream?.getAverageFrameRate() || '0') || 30,
-      audioCodec: audioStream?.getCodec(),
-      audioBitrate: audioStream ? parseInt(audioStream.getBitrate() || '0', 10) : undefined,
+      codec: videoStream?.codec_name || 'unknown',
+      fps: fps || 30,
+      audioCodec: audioStream?.codec_name,
+      audioBitrate: audioStream ? parseInt(audioStream.bit_rate || '0', 10) : undefined,
     };
   } catch (error) {
     console.error('Error getting video info:', error);

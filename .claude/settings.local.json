@@ -10,7 +10,14 @@
       "Bash(npx expo run:android)",
       "Bash(cat:*)",
       "Bash(export ANDROID_HOME=\"$LOCALAPPDATA/Android/Sdk\")",
-      "Bash(./gradlew:*)"
+      "Bash(./gradlew:*)",
+      "WebSearch",
+      "WebFetch(domain:mvnrepository.com)",
+      "WebFetch(domain:central.sonatype.com)",
+      "WebFetch(domain:stackoverflow.com)",
+      "Bash(taskkill:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm install:*)"
     ],
     "deny": [],
     "ask": []
