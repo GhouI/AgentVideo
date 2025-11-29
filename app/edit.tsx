@@ -261,17 +261,20 @@ export default function EditScreen() {
   const parseDirectCommand = (text: string, inputFile: string): { tool: string; args: Record<string, unknown> } | null => {
     const lower = text.toLowerCase();
     
-    // Trim/cut commands: "make it 5 seconds", "trim to 5 seconds", "cut to 10s", "first 5 seconds"
-    const trimMatch = lower.match(/(?:make it|trim to|cut to|first|keep first|trim first)\s*(\d+)\s*(?:seconds?|s)?/);
-    if (trimMatch) {
+    // Remove common filler words
+    const cleaned = lower.replace(/\b(the|video|please|can you|could you|i want to|make|it)\b/g, ' ').trim();
+    
+    // Trim/cut commands: "5 seconds", "trim to 5 seconds", "cut to 10s", "first 5 seconds"
+    const trimMatch = cleaned.match(/(?:trim|cut|keep|first)?\s*(\d+)\s*(?:seconds?|secs?|s)?\s*(?:long)?/);
+    if (trimMatch && (lower.includes('second') || lower.includes('sec') || lower.includes('trim') || lower.includes('cut') || lower.includes('first'))) {
       return {
         tool: 'ffmpeg_trim',
         args: { inputFile, outputFile: 'output/edited.mp4', startTime: '0', endTime: trimMatch[1] }
       };
     }
     
-    // Trim from X to Y: "trim from 5 to 10", "cut 5-10"
-    const rangeMatch = lower.match(/(?:trim|cut)\s*(?:from\s*)?(\d+)\s*(?:to|-)\s*(\d+)/);
+    // Trim from X to Y: "trim from 5 to 10", "cut 5-10", "5 to 10 seconds"
+    const rangeMatch = lower.match(/(?:trim|cut|from)?\s*(\d+)\s*(?:to|-|and)\s*(\d+)/);
     if (rangeMatch) {
       return {
         tool: 'ffmpeg_trim',
@@ -279,8 +282,8 @@ export default function EditScreen() {
       };
     }
     
-    // Brightness: "make it brighter", "increase brightness"
-    if (lower.includes('bright')) {
+    // Brightness: "brighter", "increase brightness", "lighter"
+    if (lower.match(/bright|light/) && !lower.includes('dark')) {
       return {
         tool: 'ffmpeg_filter',
         args: { inputFile, outputFile: 'output/edited.mp4', filterName: 'brightness', value: 0.3 }
@@ -295,11 +298,36 @@ export default function EditScreen() {
       };
     }
     
+    // Contrast
+    if (lower.includes('contrast')) {
+      const value = lower.includes('more') || lower.includes('increase') ? 1.5 : 0.8;
+      return {
+        tool: 'ffmpeg_filter',
+        args: { inputFile, outputFile: 'output/edited.mp4', filterName: 'contrast', value }
+      };
+    }
+    
+    // Saturation
+    if (lower.includes('saturate') || lower.includes('saturation') || lower.includes('vibrant') || lower.includes('colorful')) {
+      return {
+        tool: 'ffmpeg_filter',
+        args: { inputFile, outputFile: 'output/edited.mp4', filterName: 'saturation', value: 1.5 }
+      };
+    }
+    
     // Grayscale/black and white
-    if (lower.includes('grayscale') || lower.includes('black and white') || lower.includes('b&w')) {
+    if (lower.match(/gray|grey|black.*white|b&w|monochrome/)) {
       return {
         tool: 'ffmpeg_filter',
         args: { inputFile, outputFile: 'output/edited.mp4', filterName: 'grayscale' }
+      };
+    }
+    
+    // Sepia
+    if (lower.includes('sepia') || lower.includes('vintage') || lower.includes('old')) {
+      return {
+        tool: 'ffmpeg_filter',
+        args: { inputFile, outputFile: 'output/edited.mp4', filterName: 'sepia' }
       };
     }
     
@@ -311,32 +339,49 @@ export default function EditScreen() {
       };
     }
     
-    // Speed: "speed up", "2x speed", "make it faster"
-    const speedMatch = lower.match(/(\d+(?:\.\d+)?)\s*x\s*(?:speed|faster)/);
+    // Sharpen
+    if (lower.includes('sharp') || lower.includes('crisp') || lower.includes('clear')) {
+      return {
+        tool: 'ffmpeg_filter',
+        args: { inputFile, outputFile: 'output/edited.mp4', filterName: 'sharpen', value: 1.0 }
+      };
+    }
+    
+    // Speed: "speed up", "2x speed", "make it faster", "double speed"
+    const speedMatch = lower.match(/(\d+(?:\.\d+)?)\s*x\s*(?:speed|faster)?/);
     if (speedMatch) {
       return {
         tool: 'ffmpeg_speed',
         args: { inputFile, outputFile: 'output/edited.mp4', speed: parseFloat(speedMatch[1]) }
       };
     }
-    if (lower.includes('speed up') || lower.includes('faster')) {
+    if (lower.match(/speed.*up|faster|quick|double.*speed|2x/)) {
       return {
         tool: 'ffmpeg_speed',
         args: { inputFile, outputFile: 'output/edited.mp4', speed: 2 }
       };
     }
-    if (lower.includes('slow') || lower.includes('slower')) {
+    if (lower.match(/slow|slower|half.*speed/)) {
       return {
         tool: 'ffmpeg_speed',
         args: { inputFile, outputFile: 'output/edited.mp4', speed: 0.5 }
       };
     }
     
-    // Mute
-    if (lower.includes('mute') || lower.includes('remove audio') || lower.includes('no sound')) {
+    // Mute/audio removal
+    if (lower.match(/mute|remove.*audio|no.*sound|silent|delete.*audio/)) {
       return {
         tool: 'ffmpeg_audio',
         args: { inputFile, outputFile: 'output/edited.mp4', action: 'mute' }
+      };
+    }
+    
+    // Volume
+    if (lower.match(/volume|loud/)) {
+      const value = lower.includes('down') || lower.includes('lower') || lower.includes('quiet') ? 0.5 : 2;
+      return {
+        tool: 'ffmpeg_audio',
+        args: { inputFile, outputFile: 'output/edited.mp4', action: 'volume', value }
       };
     }
     
