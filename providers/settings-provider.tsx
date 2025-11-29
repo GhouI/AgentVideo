@@ -1,6 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { Platform, useColorScheme as useRNColorScheme } from 'react-native';
-import * as Notifications from 'expo-notifications';
+import { useColorScheme as useRNColorScheme } from 'react-native';
 
 import { getDefaultThemePreference, loadSettings, saveSettings, type AppSettings, type ThemePreference } from '@/utils/settings-storage';
 
@@ -13,30 +12,11 @@ interface SettingsContextValue extends AppSettings {
 
 const SettingsContext = createContext<SettingsContextValue | null>(null);
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
-
-async function ensureNotificationChannel(): Promise<void> {
-  if (Platform.OS !== 'android') return;
-
-  await Notifications.setNotificationChannelAsync('video-processing', {
-    name: 'Video Processing',
-    importance: Notifications.AndroidImportance.MAX,
-    vibrationPattern: [0, 250, 250, 250],
-    lightColor: '#E78A53',
-  });
-}
-
 export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const systemTheme = useRNColorScheme() ?? 'light';
   const [settings, setSettings] = useState<AppSettings>({
     theme: getDefaultThemePreference(systemTheme as ThemePreference),
-    notificationsEnabled: true,
+    notificationsEnabled: false,
   });
   const [isReady, setIsReady] = useState(false);
 
@@ -47,9 +27,9 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         ...prev,
         ...stored,
         theme: stored.theme ?? getDefaultThemePreference(systemTheme as ThemePreference),
+        notificationsEnabled: false,
       }));
       setIsReady(true);
-      await ensureNotificationChannel();
     };
 
     hydrate();
@@ -58,20 +38,6 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const updateSettings = useCallback(async (next: AppSettings) => {
     setSettings(next);
     await saveSettings(next);
-  }, []);
-
-  const ensureNotificationPermission = useCallback(async (): Promise<boolean> => {
-    try {
-      const existing = await Notifications.getPermissionsAsync();
-      if (existing.granted || existing.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL) {
-        return true;
-      }
-
-      const requested = await Notifications.requestPermissionsAsync();
-      return requested.granted || requested.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL;
-    } catch {
-      return false;
-    }
   }, []);
 
   const setTheme = useCallback(
@@ -86,40 +52,23 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
 
   const setNotificationsEnabled = useCallback(
     async (enabled: boolean) => {
-      let allowed = enabled;
-      if (enabled) {
-        allowed = await ensureNotificationPermission();
-        if (allowed) {
-          await ensureNotificationChannel();
-        }
+      // Notifications are disabled; always persist as false regardless of input.
+      if (settings.notificationsEnabled !== false) {
+        await updateSettings({
+          ...settings,
+          notificationsEnabled: false,
+        });
       }
-
-      await updateSettings({
-        ...settings,
-        notificationsEnabled: allowed,
-      });
     },
-    [ensureNotificationPermission, settings, updateSettings]
+    [settings, updateSettings]
   );
 
   const sendProcessingCompleteNotification = useCallback(
     async (title?: string) => {
-      if (!settings.notificationsEnabled) return false;
-
-      const permitted = await ensureNotificationPermission();
-      if (!permitted) return false;
-
-      await ensureNotificationChannel();
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: 'Video ready',
-          body: title ? `${title} has finished processing.` : 'Your video is ready to view.',
-        },
-        trigger: null,
-      });
-      return true;
+      // Notifications disabled; nothing to dispatch.
+      return false;
     },
-    [ensureNotificationPermission, settings.notificationsEnabled]
+    []
   );
 
   const value = useMemo(

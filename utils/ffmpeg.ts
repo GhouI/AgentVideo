@@ -71,11 +71,28 @@ export async function executeToolCall(
   toolName: string,
   args: Record<string, unknown>
 ): Promise<{ success: boolean; result: string; outputPath?: string; outputUrl?: string }> {
+  console.log(`[FFmpeg] Executing tool: ${toolName}`);
+  console.log(`[FFmpeg] Args:`, JSON.stringify(args));
+  
   try {
     const response = await callBackendTool(projectId, toolName, args);
-    const outputUrl =
-      response.outputUrl ||
-      (response.outputPath ? `${BACKEND_BASE_URL}/files/${projectId}/${response.outputPath}` : undefined);
+    
+    console.log(`[FFmpeg] Backend response:`, JSON.stringify(response));
+    
+    // Construct the output URL, adding cache-busting timestamp
+    let outputUrl: string | undefined;
+    if (response.outputUrl) {
+      // Add cache-busting to force video player to reload
+      const separator = response.outputUrl.includes('?') ? '&' : '?';
+      outputUrl = `${response.outputUrl}${separator}t=${Date.now()}`;
+    } else if (response.outputPath) {
+      outputUrl = `${BACKEND_BASE_URL}/files/${projectId}/${response.outputPath}?t=${Date.now()}`;
+    }
+    
+    console.log(`[FFmpeg] Output URL: ${outputUrl}`);
+    console.log(`[FFmpeg] Output Path: ${response.outputPath}`);
+    console.log(`[FFmpeg] Success: ${response.success}`);
+    
     return {
       success: response.success,
       result: response.message,
@@ -83,6 +100,7 @@ export async function executeToolCall(
       outputUrl,
     };
   } catch (error) {
+    console.error(`[FFmpeg] Error executing ${toolName}:`, error);
     return { success: false, result: `Error executing ${toolName}: ${String(error)}` };
   }
 }

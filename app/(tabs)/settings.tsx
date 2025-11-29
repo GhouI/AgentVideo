@@ -1,5 +1,4 @@
 import {
-  Bell,
   ChevronRight,
   CircleHelp,
   Download,
@@ -50,7 +49,7 @@ export default function SettingsScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const insets = useSafeAreaInsets();
-  const { theme, setTheme, notificationsEnabled, setNotificationsEnabled } = useAppSettings();
+  const { theme, setTheme } = useAppSettings();
   const [modelStatus, setModelStatus] = React.useState<ModelStatus>('checking');
   const [modelProgress, setModelProgress] = React.useState(0);
 
@@ -120,13 +119,6 @@ export default function SettingsScreen() {
       value: theme === 'dark',
     },
     {
-      id: 'notifications',
-      icon: <Bell size={22} color={colors.secondary} />,
-      title: 'Notifications',
-      type: 'toggle',
-      value: notificationsEnabled,
-    },
-    {
       id: 'downloadModel',
       icon: <Download size={22} color={colors.secondary} />,
       title: 'Download Model',
@@ -166,8 +158,6 @@ export default function SettingsScreen() {
   const handleToggle = async (id: string) => {
     if (id === 'darkMode') {
       await setTheme(theme === 'dark' ? 'light' : 'dark');
-    } else if (id === 'notifications') {
-      await setNotificationsEnabled(!notificationsEnabled);
     }
   };
 

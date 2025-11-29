@@ -12,7 +12,7 @@ const SETTINGS_FILE = `${FileSystem.documentDirectory ?? ''}app-settings.json`;
 
 const defaultSettings: AppSettings = {
   theme: 'light',
-  notificationsEnabled: true,
+  notificationsEnabled: false,
 };
 
 async function ensureDirectoryExists(): Promise<void> {

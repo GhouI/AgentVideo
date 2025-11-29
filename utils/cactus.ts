@@ -370,37 +370,38 @@ export const ffmpegTools: ExtendedTool[] = [
 ];
 
 // System prompt for the video editor agent
-export const VIDEO_EDITOR_SYSTEM_PROMPT = `You are an expert video editor AI assistant. Your role is to help users edit their videos by executing FFmpeg commands in their project sandbox.
+export const VIDEO_EDITOR_SYSTEM_PROMPT = `You are an expert video editor AI assistant. Your role is to help users edit their videos by calling the provided tools.
 
-CAPABILITIES:
-- Trim/cut videos to specific timestamps
-- Concatenate multiple videos together
-- Apply visual filters (brightness, contrast, saturation, blur, sharpen, grayscale, sepia, vignette)
-- Scale/resize videos
-- Change playback speed
-- Adjust audio (mute, volume, extract, replace)
-- Crop videos
-- Add overlays (images/videos)
-- Apply transitions between clips
-- Add text overlays
-- Apply zoom/pan effects (Ken Burns)
-- Get video information
+IMPORTANT - TOOL CALLING:
+When the user asks you to edit a video (trim, cut, filter, speed change, etc.), you MUST call the appropriate tool function. Do NOT just describe what you would do - actually call the tool!
+
+CAPABILITIES (use the corresponding tool for each):
+- ffmpeg_trim: Trim/cut videos to specific timestamps
+- ffmpeg_concat: Concatenate multiple videos together  
+- ffmpeg_filter: Apply visual filters (brightness, contrast, saturation, blur, sharpen, grayscale, sepia, vignette)
+- ffmpeg_scale: Scale/resize videos
+- ffmpeg_speed: Change playback speed
+- ffmpeg_audio: Adjust audio (mute, volume, extract, replace)
+- ffmpeg_crop: Crop videos
+- ffmpeg_overlay: Add overlays (images/videos)
+- ffmpeg_transition: Apply transitions between clips
+- ffmpeg_text: Add text overlays
+- ffmpeg_zoom: Apply zoom/pan effects (Ken Burns)
+- get_video_info: Get video information
+- list_sandbox_files: List available files
 
 GUIDELINES:
-1. Always analyze what the user wants before executing commands
-2. Use get_video_info first if you need to know video properties
-3. Use list_sandbox_files to see available files in the project
-4. Generate unique output filenames to avoid overwriting (e.g., output_001.mp4, output_002.mp4)
-5. When applying multiple effects, chain them properly
-6. Provide clear feedback about what you did and the result
-7. If a request is unclear, ask for clarification
+1. ALWAYS call a tool when the user asks for an edit - do not just explain
+2. Use get_video_info first if you need to know video properties (duration, resolution)
+3. For inputFile parameter, use the INPUT_FILE path provided in context
+4. For outputFile parameter, use format: "output/edited_001.mp4" (increment number for subsequent edits)
+5. Provide a brief explanation of what you're doing along with the tool call
 
-SANDBOX STRUCTURE:
-- Input files are in the 'input/' folder
-- Output files should go in the 'output/' folder
-- The main video being edited is provided in context
+FILE PATH FORMAT:
+- Always use the exact INPUT_FILE path provided in the context for inputFile arguments
+- For output files, always use: "output/<descriptive_name>.mp4"
 
-Always respond helpfully and explain what edits you're making.`;
+When user says things like "trim first 5 seconds", "cut to 10 seconds", "make it brighter", etc. - CALL THE TOOL!`;
 
 // Cactus LM instance management
 let cactusInstance: CactusLM | null = null;
@@ -417,6 +418,7 @@ export interface CactusInitCallbacks {
 
 export async function initializeCactus(callbacks?: CactusInitCallbacks): Promise<CactusLM> {
   if (cactusInstance && isInitialized) {
+    console.log('[Cactus] Already initialized, reusing instance');
     return cactusInstance;
   }
 
@@ -429,7 +431,10 @@ export async function initializeCactus(callbacks?: CactusInitCallbacks): Promise
     
     // Check if model needs downloading
     const models = await cactusInstance.getModels();
+    console.log('[Cactus] Available models:', models.map(m => ({ name: m.name, supportsToolCalling: m.supportsToolCalling, isDownloaded: m.isDownloaded, sizeMb: m.sizeMb })));
+    
     const toolCallingModels = models.filter(m => m.supportsToolCalling);
+    console.log('[Cactus] Tool-calling models:', toolCallingModels.map(m => m.name));
     
     // Find a small tool-calling model that's downloaded or download one
     let selectedModel = toolCallingModels.find(m => m.isDownloaded);
@@ -438,6 +443,7 @@ export async function initializeCactus(callbacks?: CactusInitCallbacks): Promise
       // Download the smallest tool-calling model
       const sortedBySize = toolCallingModels.sort((a, b) => a.sizeMb - b.sizeMb);
       selectedModel = sortedBySize[0];
+      console.log('[Cactus] Will download model:', selectedModel.name);
       
       isDownloading = true;
       callbacks?.onDownloadProgress?.(0);
@@ -453,12 +459,16 @@ export async function initializeCactus(callbacks?: CactusInitCallbacks): Promise
       callbacks?.onDownloadComplete?.();
     }
 
+    console.log('[Cactus] Selected model:', selectedModel?.name || 'default');
+    
     await cactusInstance.init();
     isInitialized = true;
+    console.log('[Cactus] Initialization complete');
     callbacks?.onInitComplete?.();
     
     return cactusInstance;
   } catch (error) {
+    console.error('[Cactus] Initialization error:', error);
     isDownloading = false;
     isInitialized = false;
     callbacks?.onError?.(error as Error);
@@ -516,6 +526,33 @@ export interface VideoEditSession {
   currentOutputPath: string;
 }
 
+// Helper to extract input file path from various path formats
+function extractInputFilePath(path: string): string {
+  if (!path) return 'input/video.mp4';
+  
+  // If it's already in input/ format, return as-is
+  if (path.startsWith('input/')) return path;
+  
+  // If it's a URL, extract the filename from the path
+  if (path.includes('/files/') && path.includes('/input/')) {
+    const match = path.match(/\/input\/([^/?]+)/);
+    if (match) return `input/${match[1]}`;
+  }
+  
+  // If it's a URL with output path
+  if (path.includes('/files/') && path.includes('/output/')) {
+    const match = path.match(/\/output\/([^/?]+)/);
+    if (match) return `output/${match[1]}`;
+  }
+  
+  // If it's output/ format, return as-is
+  if (path.startsWith('output/')) return path;
+  
+  // Try to extract just the filename
+  const filename = path.split('/').pop()?.split('?')[0] || 'video.mp4';
+  return `input/${filename}`;
+}
+
 export async function sendEditRequest(
   session: VideoEditSession,
   userMessage: string,
@@ -529,6 +566,15 @@ export async function sendEditRequest(
     throw new Error('Cactus not initialized. Call initializeCactus() first.');
   }
 
+  // Extract the proper input file path for tool calls
+  const inputFilePath = extractInputFilePath(session.mainVideoPath);
+  const currentOutputPath = session.currentOutputPath 
+    ? extractInputFilePath(session.currentOutputPath)
+    : inputFilePath;
+  
+  // Determine which file to use (prefer current output if it exists)
+  const activeInputFile = session.currentOutputPath ? currentOutputPath : inputFilePath;
+
   // Build messages array with context
   const messages: Message[] = [
     {
@@ -537,8 +583,11 @@ export async function sendEditRequest(
 
 CURRENT PROJECT CONTEXT:
 - Project ID: ${session.projectId}
-- Main Video: ${session.mainVideoPath}
-- Current Output: ${session.currentOutputPath}`,
+- INPUT_FILE: ${activeInputFile}
+- Original video: ${inputFilePath}
+${session.currentOutputPath ? `- Previous edit output: ${currentOutputPath}` : ''}
+
+Use "${activeInputFile}" as the inputFile parameter when calling tools.`,
     },
     // Add conversation history
     ...session.messages.map((msg) => ({
@@ -552,18 +601,45 @@ CURRENT PROJECT CONTEXT:
     },
   ];
 
+  console.log('[Cactus] Sending request with tools:', ffmpegTools.map(t => t.name));
+  console.log('[Cactus] Active input file:', activeInputFile);
+  console.log('[Cactus] User message:', userMessage);
+  console.log('[Cactus] System prompt length:', messages[0]?.content?.length);
+
   const result = await cactus.complete({
     messages,
     tools: ffmpegTools as unknown as Parameters<typeof cactus.complete>[0]['tools'],
     onToken,
     options: {
       maxTokens: 1024,
-      temperature: 0.7,
+      temperature: 0.3, // Lower temperature for more deterministic tool calling
     },
   });
 
+  console.log('[Cactus] Full result:', JSON.stringify(result, null, 2));
+  console.log('[Cactus] Response:', result.response);
+  console.log('[Cactus] Function calls:', JSON.stringify(result.functionCalls || []));
+  console.log('[Cactus] Success:', result.success);
+
+  // If no function calls but response mentions tool/function, the model might not be calling tools properly
+  if ((!result.functionCalls || result.functionCalls.length === 0) && result.response) {
+    console.log('[Cactus] WARNING: No function calls generated. Model response:', result.response);
+  }
+
+  // Clean up model artifacts from response (like <im_end>, </s>, etc.)
+  let cleanedResponse = result.response || '';
+  cleanedResponse = cleanedResponse
+    .replace(/<\|?im_end\|?>/gi, '')
+    .replace(/<\|?im_start\|?>/gi, '')
+    .replace(/<\/s>/gi, '')
+    .replace(/<s>/gi, '')
+    .replace(/<\|endoftext\|>/gi, '')
+    .replace(/<\|assistant\|>/gi, '')
+    .replace(/<\|user\|>/gi, '')
+    .trim();
+
   return {
-    response: result.response,
+    response: cleanedResponse,
     functionCalls: result.functionCalls || [],
   };
 }
