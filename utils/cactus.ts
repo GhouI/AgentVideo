@@ -422,60 +422,47 @@ export async function initializeCactus(callbacks?: CactusInitCallbacks): Promise
   }
 
   try {
-    console.log('[Cactus] Checking for downloaded models...');
+    console.log('[Cactus] PERMANENTLY USING qwen3-1.7');
     
-    // Check available models
+    // ALWAYS use qwen3-1.7
     const tempInstance = new CactusLM();
     const models = await tempInstance.getModels();
-    const downloadedModels = models.filter(m => m.isDownloaded && m.supportsToolCalling);
     
-    console.log('[Cactus] Downloaded models:', downloadedModels.map(m => ({ name: m.name, slug: (m as any).slug })));
+    // Find qwen3-1.7 specifically
+    const qwen17 = models.find(m => (m as any).slug === 'qwen3-1.7' || m.name === 'Qwen 3 1.7B');
     
-    // Use selected model or first downloaded model
-    let modelToUse = null;
-    if (selectedModelSlug) {
-      modelToUse = downloadedModels.find(m => (m as any).slug === selectedModelSlug);
-      console.log('[Cactus] Using selected model:', modelToUse?.name || 'not found, will use default');
+    if (!qwen17) {
+      throw new Error('qwen3-1.7 model not found in available models');
     }
     
-    if (!modelToUse && downloadedModels.length > 0) {
-      modelToUse = downloadedModels[0];
-      console.log('[Cactus] Using first downloaded model:', modelToUse.name);
-    }
+    console.log('[Cactus] qwen3-1.7 found - Downloaded:', qwen17.isDownloaded);
     
-    // Create instance with specific model if available
-    if (modelToUse) {
-      const slug = (modelToUse as any).slug;
-      console.log('[Cactus] Initializing with slug:', slug);
-      cactusInstance = new CactusLM({ model: slug });
-    } else {
-      // No model downloaded - need to download
-      console.log('[Cactus] No downloaded models, need to download first');
-      cactusInstance = new CactusLM();
+    if (!qwen17.isDownloaded) {
+      // Download qwen3-1.7
+      console.log('[Cactus] Downloading qwen3-1.7...');
+      cactusInstance = new CactusLM({ model: 'qwen3-1.7' });
       
-      const toolCallingModels = models.filter(m => m.supportsToolCalling);
-      if (toolCallingModels.length > 0) {
-        const smallest = toolCallingModels.sort((a, b) => a.sizeMb - b.sizeMb)[0];
-        console.log('[Cactus] Downloading:', smallest.name);
-        
-        isDownloading = true;
-        callbacks?.onDownloadProgress?.(0);
-        
-        await cactusInstance.download({
-          onProgress: (progress) => {
-            downloadProgress = progress;
-            callbacks?.onDownloadProgress?.(progress);
-          },
-        });
-        
-        isDownloading = false;
-        callbacks?.onDownloadComplete?.();
-      }
+      isDownloading = true;
+      callbacks?.onDownloadProgress?.(0);
+      
+      await cactusInstance.download({
+        onProgress: (progress) => {
+          downloadProgress = progress * 100;
+          callbacks?.onDownloadProgress?.(progress * 100);
+        },
+      });
+      
+      isDownloading = false;
+      callbacks?.onDownloadComplete?.();
+    } else {
+      // Use existing qwen3-1.7
+      console.log('[Cactus] Using qwen3-1.7');
+      cactusInstance = new CactusLM({ model: 'qwen3-1.7' });
     }
     
     await cactusInstance.init();
     isInitialized = true;
-    console.log('[Cactus] Ready!');
+    console.log('[Cactus] qwen3-1.7 initialized and ready!');
     callbacks?.onInitComplete?.();
     
     return cactusInstance;
