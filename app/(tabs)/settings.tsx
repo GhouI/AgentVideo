@@ -27,9 +27,10 @@ import { Colors, BorderRadius, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAppSettings } from '@/providers/settings-provider';
 import {
+  downloadModel,
+  getAvailableModels,
   getCactusDownloadProgress,
   hasDownloadedModel,
-  initializeCactus,
   isCactusDownloading,
   isCactusReady,
 } from '@/utils/cactus';
@@ -163,21 +164,62 @@ export default function SettingsScreen() {
 
   const handleDownloadModel = async () => {
     if (modelStatus === 'downloading') return;
-    setModelStatus('downloading');
-
+    
+    // Show model selection
     try {
-      await initializeCactus({
-        onDownloadProgress: (progress) => setModelProgress(progress),
-        onDownloadComplete: () => setModelProgress(100),
-        onInitComplete: () => setModelStatus('ready'),
-        onError: () => setModelStatus('error'),
+      const models = await getAvailableModels();
+      const toolModels = models.filter(m => m.supportsToolCalling);
+      
+      if (toolModels.length === 0) {
+        Alert.alert('Error', 'No models available for download');
+        return;
+      }
+      
+      // Show selection dialog
+      Alert.alert(
+        'Select Model',
+        'Choose a model to download:',
+        [
+          ...toolModels.slice(0, 4).map(model => ({
+            text: `${model.name} (${model.sizeMb}MB)${model.isDownloaded ? ' [Downloaded]' : ''}`,
+            onPress: () => startDownload(model.name),
+          })),
+          { text: 'Cancel', style: 'cancel' as const },
+        ]
+      );
+    } catch (error) {
+      console.error('Failed to get models:', error);
+      Alert.alert('Error', 'Failed to get available models');
+    }
+  };
+
+  const startDownload = async (modelName: string) => {
+    setModelStatus('downloading');
+    setModelProgress(0);
+    
+    try {
+      await downloadModel(modelName, {
+        onDownloadProgress: (progress) => {
+          console.log('Download progress:', progress);
+          setModelProgress(progress);
+        },
+        onDownloadComplete: () => {
+          console.log('Download complete');
+          setModelProgress(100);
+        },
+        onError: (error) => {
+          console.error('Download error:', error);
+          setModelStatus('error');
+        },
       });
+      
       setModelStatus('ready');
       setModelProgress(100);
-      Alert.alert('Model ready', 'The AI model has been downloaded.');
-    } catch {
+      Alert.alert('Success', `${modelName} has been downloaded and is ready to use!`);
+    } catch (error) {
+      console.error('Download failed:', error);
       setModelStatus('error');
-      Alert.alert('Download failed', 'Unable to download the model. Please try again.');
+      Alert.alert('Download Failed', String(error));
     }
   };
 

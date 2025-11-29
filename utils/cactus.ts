@@ -484,16 +484,99 @@ export function getCactusDownloadProgress(): number {
 
 export async function hasDownloadedModel(): Promise<boolean> {
   try {
-    if (!cactusInstance) {
-      cactusInstance = new CactusLM();
-    }
-
-    const models = await cactusInstance.getModels();
+    const tempInstance = new CactusLM();
+    const models = await tempInstance.getModels();
     const toolCallingModels = models.filter((m) => m.supportsToolCalling);
     return toolCallingModels.some((m) => m.isDownloaded);
   } catch (error) {
     console.error('Failed to check model availability', error);
     return false;
+  }
+}
+
+// Force download a specific model
+export async function downloadModel(
+  modelName?: string,
+  callbacks?: CactusInitCallbacks
+): Promise<void> {
+  try {
+    const tempInstance = new CactusLM();
+    const models = await tempInstance.getModels();
+    
+    console.log('[Cactus] Available models for download:', models.map(m => m.name));
+    
+    // Find the requested model or default to Qwen 3 1.7B or smallest
+    let targetModel = modelName 
+      ? models.find(m => m.name === modelName && m.supportsToolCalling)
+      : models.find(m => m.name === 'Qwen 3 1.7B' && m.supportsToolCalling);
+    
+    if (!targetModel) {
+      // Fall back to smallest tool-calling model
+      const toolModels = models.filter(m => m.supportsToolCalling).sort((a, b) => a.sizeMb - b.sizeMb);
+      targetModel = toolModels[0];
+    }
+    
+    if (!targetModel) {
+      throw new Error('No tool-calling models available');
+    }
+    
+    console.log('[Cactus] Target model:', targetModel.name, '- Downloaded:', targetModel.isDownloaded);
+    
+    if (targetModel.isDownloaded) {
+      console.log('[Cactus] Model already downloaded');
+      callbacks?.onDownloadProgress?.(100);
+      callbacks?.onDownloadComplete?.();
+      return;
+    }
+    
+    // Create instance with specific model and download
+    const downloadInstance = new CactusLM({ model: targetModel.name });
+    
+    console.log('[Cactus] Starting download of:', targetModel.name);
+    isDownloading = true;
+    callbacks?.onDownloadProgress?.(0);
+    
+    await downloadInstance.download({
+      onProgress: (progress) => {
+        const percent = progress * 100;
+        downloadProgress = percent;
+        console.log(`[Cactus] Download progress: ${percent.toFixed(1)}%`);
+        callbacks?.onDownloadProgress?.(percent);
+      },
+    });
+    
+    isDownloading = false;
+    downloadProgress = 100;
+    console.log('[Cactus] Download complete!');
+    callbacks?.onDownloadComplete?.();
+    
+  } catch (error) {
+    console.error('[Cactus] Download error:', error);
+    isDownloading = false;
+    callbacks?.onError?.(error as Error);
+    throw error;
+  }
+}
+
+// Get list of available models
+export async function getAvailableModels(): Promise<Array<{
+  name: string;
+  sizeMb: number;
+  isDownloaded: boolean;
+  supportsToolCalling: boolean;
+}>> {
+  try {
+    const tempInstance = new CactusLM();
+    const models = await tempInstance.getModels();
+    return models.map(m => ({
+      name: m.name,
+      sizeMb: m.sizeMb,
+      isDownloaded: m.isDownloaded,
+      supportsToolCalling: m.supportsToolCalling,
+    }));
+  } catch (error) {
+    console.error('[Cactus] Failed to get models:', error);
+    return [];
   }
 }
 
