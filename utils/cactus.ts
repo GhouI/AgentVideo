@@ -422,58 +422,42 @@ export async function initializeCactus(callbacks?: CactusInitCallbacks): Promise
   }
 
   try {
-    // First create instance without specifying model to get available models
+    // Simple initialization - just use default model
     cactusInstance = new CactusLM();
     
-    // Check available models
+    console.log('[Cactus] Checking for downloaded models...');
+    
+    // Check if we need to download
     const models = await cactusInstance.getModels();
-    console.log('[Cactus] Available models:', models.map(m => ({ name: m.name, supportsToolCalling: m.supportsToolCalling, isDownloaded: m.isDownloaded, sizeMb: m.sizeMb })));
+    const downloadedModel = models.find(m => m.isDownloaded && m.supportsToolCalling);
     
-    const toolCallingModels = models.filter(m => m.supportsToolCalling);
-    console.log('[Cactus] Tool-calling models:', toolCallingModels.map(m => m.name));
+    console.log('[Cactus] Downloaded tool-calling model:', downloadedModel?.name || 'none');
     
-    // Look for Qwen 3 1.7B specifically (better at tool calling)
-    let selectedModel = models.find(m => m.name === 'Qwen 3 1.7B' && m.supportsToolCalling);
-    
-    // If not found or not downloaded, use any downloaded tool-calling model
-    if (!selectedModel) {
-      selectedModel = toolCallingModels.find(m => m.isDownloaded);
-    }
-    
-    // If nothing downloaded, get Qwen 3 1.7B or smallest
-    if (!selectedModel && toolCallingModels.length > 0) {
-      selectedModel = models.find(m => m.name === 'Qwen 3 1.7B') || toolCallingModels.sort((a, b) => a.sizeMb - b.sizeMb)[0];
-    }
-    
-    console.log('[Cactus] Selected model:', selectedModel?.name);
-    
-    // Download if needed
-    if (selectedModel && !selectedModel.isDownloaded) {
-      console.log('[Cactus] Downloading model:', selectedModel.name);
-      
-      isDownloading = true;
-      callbacks?.onDownloadProgress?.(0);
-      
-      // Re-create instance with specific model for download
-      cactusInstance = new CactusLM({ model: selectedModel.name });
-      
-      await cactusInstance.download({
-        onProgress: (progress) => {
-          downloadProgress = progress;
-          callbacks?.onDownloadProgress?.(progress);
-        },
-      });
-      
-      isDownloading = false;
-      callbacks?.onDownloadComplete?.();
-    } else if (selectedModel?.isDownloaded) {
-      // Use the downloaded model
-      cactusInstance = new CactusLM({ model: selectedModel.name });
+    if (!downloadedModel) {
+      // Need to download - get smallest tool-calling model
+      const toolCallingModels = models.filter(m => m.supportsToolCalling);
+      if (toolCallingModels.length > 0) {
+        const smallest = toolCallingModels.sort((a, b) => a.sizeMb - b.sizeMb)[0];
+        console.log('[Cactus] Downloading:', smallest.name);
+        
+        isDownloading = true;
+        callbacks?.onDownloadProgress?.(0);
+        
+        await cactusInstance.download({
+          onProgress: (progress) => {
+            downloadProgress = progress;
+            callbacks?.onDownloadProgress?.(progress);
+          },
+        });
+        
+        isDownloading = false;
+        callbacks?.onDownloadComplete?.();
+      }
     }
     
     await cactusInstance.init();
     isInitialized = true;
-    console.log('[Cactus] Initialization complete with model:', selectedModel?.name);
+    console.log('[Cactus] Ready!');
     callbacks?.onInitComplete?.();
     
     return cactusInstance;
