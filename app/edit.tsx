@@ -8,6 +8,7 @@ import {
     Mic,
     Pause,
     Play,
+    Scissors,
     Sparkles,
 } from 'lucide-react-native';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -187,6 +188,56 @@ export default function EditScreen() {
       ]
     );
   }, [currentVideoPath]);
+
+  // Direct test function - bypasses AI to test backend directly
+  const handleDirectTest = useCallback(async () => {
+    if (!project) return;
+    
+    const mainVideo = getMainVideo(project);
+    if (!mainVideo?.remotePath) {
+      Alert.alert('Error', 'No video file found');
+      return;
+    }
+
+    Alert.alert(
+      'Test Backend Directly',
+      'This will trim the video to first 5 seconds (bypassing AI)',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Test Trim',
+          onPress: async () => {
+            setIsSending(true);
+            try {
+              const inputFile = mainVideo.remotePath;
+              console.log('[DirectTest] Input file:', inputFile);
+              
+              const result = await executeToolCall(project.id, 'ffmpeg_trim', {
+                inputFile: inputFile,
+                outputFile: 'output/test_trim.mp4',
+                startTime: '0',
+                endTime: '5',
+              });
+              
+              console.log('[DirectTest] Result:', result);
+              
+              if (result.success && result.outputUrl) {
+                setCurrentVideoPath(result.outputUrl);
+                Alert.alert('Success', `Video trimmed! Output: ${result.outputPath}`);
+              } else {
+                Alert.alert('Error', `Backend error: ${result.result}`);
+              }
+            } catch (error) {
+              console.error('[DirectTest] Error:', error);
+              Alert.alert('Error', String(error));
+            } finally {
+              setIsSending(false);
+            }
+          },
+        },
+      ]
+    );
+  }, [project]);
 
   const togglePlayback = useCallback(async () => {
     if (!videoRef.current) return;
@@ -396,9 +447,14 @@ export default function EditScreen() {
         <Text style={[styles.headerTitle, { color: colors.foreground }]} numberOfLines={1}>
           {projectTitle}
         </Text>
-        <Pressable onPress={handleExport}>
-          <Download size={22} color={colors.primary} />
-        </Pressable>
+        <View style={{ flexDirection: 'row', gap: Spacing.md }}>
+          <Pressable onPress={handleDirectTest}>
+            <Scissors size={22} color={colors.destructive || '#ef4444'} />
+          </Pressable>
+          <Pressable onPress={handleExport}>
+            <Download size={22} color={colors.primary} />
+          </Pressable>
+        </View>
       </View>
 
       <View style={styles.videoContainer}>
