@@ -1,8 +1,9 @@
-import { Image } from 'expo-image';
-import { useRouter } from 'expo-router';
-import { Plus } from 'lucide-react-native';
-import React from 'react';
+import { Video, ResizeMode } from 'expo-av';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { Film, Plus, Sparkles } from 'lucide-react-native';
+import React, { useState, useCallback } from 'react';
 import {
+  ActivityIndicator,
   Dimensions,
   Pressable,
   ScrollView,
@@ -14,52 +15,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, BorderRadius, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-
-interface Project {
-  id: string;
-  title: string;
-  lastEdited: string;
-  thumbnail: string;
-}
-
-const MOCK_PROJECTS: Project[] = [
-  {
-    id: '1',
-    title: 'LA Trip Highlights',
-    lastEdited: 'Oct 26, 2023',
-    thumbnail: 'https://images.unsplash.com/photo-1534190760961-74e8c1c5c3da?w=400&h=600&fit=crop',
-  },
-  {
-    id: '2',
-    title: 'Birthday Party Reel',
-    lastEdited: 'Oct 24, 2023',
-    thumbnail: 'https://images.unsplash.com/photo-1530103862676-de8c9debad1d?w=400&h=600&fit=crop',
-  },
-  {
-    id: '3',
-    title: 'Summer Vacation',
-    lastEdited: 'Oct 21, 2023',
-    thumbnail: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=400&h=600&fit=crop',
-  },
-  {
-    id: '4',
-    title: 'Product Demo Video',
-    lastEdited: 'Oct 19, 2023',
-    thumbnail: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400&h=600&fit=crop',
-  },
-  {
-    id: '5',
-    title: 'Mountain Hike',
-    lastEdited: 'Oct 15, 2023',
-    thumbnail: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=400&h=600&fit=crop',
-  },
-  {
-    id: '6',
-    title: 'Cooking Show Intro',
-    lastEdited: 'Oct 12, 2023',
-    thumbnail: 'https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=400&h=600&fit=crop',
-  },
-];
+import {
+  listProjects,
+  getMainVideo,
+  getRelativeTimeString,
+  type ProjectMetadata,
+} from '@/utils/project-storage';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_WIDTH = (SCREEN_WIDTH - Spacing.lg * 3) / 2;
@@ -69,26 +30,63 @@ export default function DashboardScreen() {
   const colors = Colors[colorScheme ?? 'light'];
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  
+  const [projects, setProjects] = useState<ProjectMetadata[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [previewingId, setPreviewingId] = useState<string | null>(null);
 
-  const handleProjectPress = (project: Project) => {
+  // Load projects on focus
+  useFocusEffect(
+    useCallback(() => {
+      const loadProjects = async () => {
+        setIsLoading(true);
+        try {
+          const projectList = await listProjects();
+          setProjects(projectList);
+        } catch (error) {
+          console.error('Failed to load projects:', error);
+        } finally {
+          setIsLoading(false);
+        }
+      };
+      
+      loadProjects();
+    }, [])
+  );
+
+  const handleProjectPress = useCallback((project: ProjectMetadata) => {
     router.push({
       pathname: '/edit',
       params: { projectId: project.id, projectTitle: project.title },
     });
-  };
+  }, [router]);
 
-  const handleCreateNew = () => {
+  const handleCreateNew = useCallback(() => {
     router.push('/(tabs)/create');
-  };
+  }, [router]);
+
+  const handleLongPress = useCallback((projectId: string) => {
+    setPreviewingId((prev) => (prev === projectId ? null : projectId));
+  }, []);
+
+  // Get the main video thumbnail path for a project
+  const getProjectThumbnail = useCallback((project: ProjectMetadata): string | null => {
+    const mainVideo = getMainVideo(project);
+    return mainVideo?.thumbnailPath || mainVideo?.path || null;
+  }, []);
+
+  const recentProjects = projects.slice(0, 6);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { paddingTop: insets.top + Spacing.md }]}>
-        <View style={styles.headerSpacer} />
+        <View style={styles.headerLeft}>
+          <Sparkles size={24} color={colors.primary} />
+        </View>
         <Text style={[styles.headerTitle, { color: colors.foreground }]}>
           Prompt Edit
         </Text>
-        <View style={styles.headerSpacer} />
+        <View style={styles.headerRight} />
       </View>
 
       <ScrollView
@@ -96,40 +94,106 @@ export default function DashboardScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={[styles.sectionTitle, { color: colors.foreground }]}>
-          Recent Projects
-        </Text>
-
-        <View style={styles.projectGrid}>
-          {MOCK_PROJECTS.map((project) => (
+        {isLoading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={colors.primary} />
+          </View>
+        ) : projects.length === 0 ? (
+          <View style={styles.emptyState}>
+            <View style={[styles.emptyIcon, { backgroundColor: colors.muted }]}>
+              <Film size={48} color={colors.mutedForeground} />
+            </View>
+            <Text style={[styles.emptyTitle, { color: colors.foreground }]}>
+              No Projects Yet
+            </Text>
+            <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
+              Create your first project to start editing videos with AI
+            </Text>
             <Pressable
-              key={project.id}
-              style={({ pressed }) => [
-                styles.projectCard,
-                { opacity: pressed ? 0.8 : 1 },
-              ]}
-              onPress={() => handleProjectPress(project)}
+              style={[styles.emptyButton, { backgroundColor: colors.primary }]}
+              onPress={handleCreateNew}
             >
-              <Image
-                source={{ uri: project.thumbnail }}
-                style={[styles.projectThumbnail, { backgroundColor: colors.muted }]}
-                contentFit="cover"
-                transition={200}
-              />
-              <View style={styles.projectInfo}>
-                <Text
-                  style={[styles.projectTitle, { color: colors.foreground }]}
-                  numberOfLines={1}
-                >
-                  {project.title}
-                </Text>
-                <Text style={[styles.projectDate, { color: colors.mutedForeground }]}>
-                  Last edited: {project.lastEdited}
-                </Text>
-              </View>
+              <Plus size={20} color={colors.primaryForeground} />
+              <Text style={[styles.emptyButtonText, { color: colors.primaryForeground }]}>
+                Create Project
+              </Text>
             </Pressable>
-          ))}
-        </View>
+          </View>
+        ) : (
+          <>
+            <Text style={[styles.sectionTitle, { color: colors.foreground }]}>
+              Recent Projects
+            </Text>
+
+            <View style={styles.projectGrid}>
+              {recentProjects.map((project) => {
+                const thumbnailPath = getProjectThumbnail(project);
+                const isVideo = thumbnailPath?.endsWith('.mp4') || 
+                               thumbnailPath?.endsWith('.mov') || 
+                               thumbnailPath?.endsWith('.avi');
+                const isPreviewing = previewingId === project.id && isVideo;
+                
+                return (
+                  <Pressable
+                    key={project.id}
+                    style={({ pressed }) => [
+                      styles.projectCard,
+                      { opacity: pressed ? 0.8 : 1 },
+                    ]}
+                    onPress={() => handleProjectPress(project)}
+                    onLongPress={() => handleLongPress(project.id)}
+                  >
+                    <View style={[styles.projectThumbnail, { backgroundColor: colors.muted }]}>
+                      {thumbnailPath && isVideo && isPreviewing ? (
+                        <Video
+                          source={{ uri: thumbnailPath }}
+                          style={styles.thumbnailVideo}
+                          resizeMode={ResizeMode.COVER}
+                          shouldPlay
+                          isLooping
+                          isMuted
+                        />
+                      ) : thumbnailPath && !isVideo ? (
+                        <Video
+                          source={{ uri: thumbnailPath }}
+                          style={styles.thumbnailVideo}
+                          resizeMode={ResizeMode.COVER}
+                          shouldPlay={false}
+                        />
+                      ) : (
+                        <View style={styles.thumbnailPlaceholder}>
+                          <Film size={32} color={colors.mutedForeground} />
+                        </View>
+                      )}
+                    </View>
+                    <View style={styles.projectInfo}>
+                      <Text
+                        style={[styles.projectTitle, { color: colors.foreground }]}
+                        numberOfLines={1}
+                      >
+                        {project.title}
+                      </Text>
+                      <Text style={[styles.projectDate, { color: colors.mutedForeground }]}>
+                        {getRelativeTimeString(project.updatedAt)}
+                      </Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {projects.length > 6 && (
+              <Pressable
+                style={[styles.viewAllButton, { borderColor: colors.border }]}
+                onPress={() => router.push('/(tabs)/library')}
+              >
+                <Text style={[styles.viewAllText, { color: colors.primary }]}>
+                  View All Projects
+                </Text>
+              </Pressable>
+            )}
+          </>
+        )}
 
         <View style={styles.bottomPadding} />
       </ScrollView>
@@ -161,7 +225,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingBottom: Spacing.sm,
   },
-  headerSpacer: {
+  headerLeft: {
     width: 48,
   },
   headerTitle: {
@@ -169,11 +233,57 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: -0.3,
   },
+  headerRight: {
+    width: 48,
+  },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
     paddingHorizontal: Spacing.lg,
+  },
+  loadingContainer: {
+    flex: 1,
+    paddingVertical: Spacing.xxl * 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: Spacing.xxl * 2,
+    gap: Spacing.md,
+  },
+  emptyIcon: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.md,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  emptyText: {
+    fontSize: 14,
+    textAlign: 'center',
+    maxWidth: 280,
+  },
+  emptyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.full,
+    marginTop: Spacing.lg,
+  },
+  emptyButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
   },
   sectionTitle: {
     fontSize: 18,
@@ -195,6 +305,16 @@ const styles = StyleSheet.create({
     width: '100%',
     aspectRatio: 3 / 4,
     borderRadius: BorderRadius.xl,
+    overflow: 'hidden',
+  },
+  thumbnailVideo: {
+    width: '100%',
+    height: '100%',
+  },
+  thumbnailPlaceholder: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   projectInfo: {
     gap: 4,
@@ -205,6 +325,17 @@ const styles = StyleSheet.create({
   },
   projectDate: {
     fontSize: 14,
+  },
+  viewAllButton: {
+    marginTop: Spacing.xl,
+    paddingVertical: Spacing.md,
+    borderWidth: 1,
+    borderRadius: BorderRadius.lg,
+    alignItems: 'center',
+  },
+  viewAllText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
   bottomPadding: {
     height: 100,

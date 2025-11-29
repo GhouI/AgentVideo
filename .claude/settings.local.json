@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(scoop install:*)",
+      "Bash(echo:*)",
+      "Bash(scoop search:*)",
+      "Bash(scoop bucket:*)",
+      "Bash(export JAVA_HOME=\"$HOME/scoop/apps/temurin17-jdk/current\")",
+      "Bash(\"$JAVA_HOME/bin/java\" -version)",
+      "Bash(npx expo run:android)",
+      "Bash(cat:*)",
+      "Bash(export ANDROID_HOME=\"$LOCALAPPDATA/Android/Sdk\")",
+      "Bash(./gradlew:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

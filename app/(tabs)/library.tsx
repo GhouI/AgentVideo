@@ -1,8 +1,17 @@
-import { Image } from 'expo-image';
-import { useRouter } from 'expo-router';
-import { ChevronDown, MoreHorizontal, Search, Video } from 'lucide-react-native';
-import React, { useState } from 'react';
+import { Video, ResizeMode } from 'expo-av';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { 
+  ChevronDown, 
+  Film, 
+  MoreHorizontal, 
+  Search, 
+  Trash2,
+  Video as VideoIcon,
+} from 'lucide-react-native';
+import React, { useState, useCallback } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,129 +23,255 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, BorderRadius, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import {
+  listProjects,
+  deleteProject,
+  getMainVideo,
+  getRelativeTimeString,
+  formatDuration,
+  type ProjectMetadata,
+} from '@/utils/project-storage';
 
-interface Project {
-  id: string;
-  title: string;
-  lastEdited: string;
-  duration: string;
-  prompt: string;
-  thumbnail: string;
-  section: 'today' | 'yesterday' | 'older';
-}
+type SortOption = 'date' | 'name' | 'size';
+type FilterOption = 'all' | 'today' | 'week' | 'month';
 
-const MOCK_PROJECTS: Project[] = [
-  {
-    id: '1',
-    title: 'Summer Trip Highlights',
-    lastEdited: 'Today',
-    duration: '02:45',
-    prompt: "Add a cinematic zoom on the first clip...",
-    thumbnail: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=400&h=300&fit=crop',
-    section: 'today',
-  },
-  {
-    id: '2',
-    title: 'Mountain Adventure',
-    lastEdited: 'Today',
-    duration: '01:15',
-    prompt: "Sync the beat drops with the drone shots...",
-    thumbnail: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=400&h=300&fit=crop',
-    section: 'today',
-  },
-  {
-    id: '3',
-    title: 'Tokyo Nights',
-    lastEdited: 'Yesterday',
-    duration: '00:58',
-    prompt: "Apply a glitch effect to the transitions",
-    thumbnail: 'https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?w=400&h=300&fit=crop',
-    section: 'yesterday',
-  },
-  {
-    id: '4',
-    title: 'Product Launch',
-    lastEdited: '3 days ago',
-    duration: '01:30',
-    prompt: "Add smooth fade transitions between scenes",
-    thumbnail: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400&h=300&fit=crop',
-    section: 'older',
-  },
+const SORT_OPTIONS: { value: SortOption; label: string }[] = [
+  { value: 'date', label: 'Date' },
+  { value: 'name', label: 'Name' },
 ];
 
-const FILTER_OPTIONS = ['All', 'Sort by: Date', 'Name', 'Shared'];
+const FILTER_OPTIONS: { value: FilterOption; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'today', label: 'Today' },
+  { value: 'week', label: 'This Week' },
+  { value: 'month', label: 'This Month' },
+];
 
 export default function LibraryScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  
+  const [projects, setProjects] = useState<ProjectMetadata[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeFilter, setActiveFilter] = useState('All');
+  const [sortBy] = useState<SortOption>('date');
+  const [filterBy, setFilterBy] = useState<FilterOption>('all');
+  const [showSortMenu, setShowSortMenu] = useState(false);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
 
-  const handleProjectPress = (project: Project) => {
+  // Load projects on focus
+  useFocusEffect(
+    useCallback(() => {
+      const loadProjects = async () => {
+        setIsLoading(true);
+        try {
+          const projectList = await listProjects();
+          setProjects(projectList);
+        } catch (err) {
+          console.error('Failed to load projects:', err);
+        } finally {
+          setIsLoading(false);
+        }
+      };
+      
+      loadProjects();
+    }, [])
+  );
+
+  const handleProjectPress = useCallback((project: ProjectMetadata) => {
     router.push({
       pathname: '/edit',
       params: { projectId: project.id, projectTitle: project.title },
     });
+  }, [router]);
+
+  const handleDeleteProject = useCallback(async (projectId: string) => {
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) return;
+    
+    Alert.alert(
+      'Delete Project',
+      `Are you sure you want to delete "${project.title}"? This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteProject(projectId);
+              setProjects((prev) => prev.filter((p) => p.id !== projectId));
+              setSelectedProjectId(null);
+            } catch (error) {
+              Alert.alert('Error', 'Failed to delete project');
+            }
+          },
+        },
+      ]
+    );
+  }, [projects]);
+
+  const handleMorePress = useCallback((projectId: string) => {
+    setSelectedProjectId((prev) => (prev === projectId ? null : projectId));
+  }, []);
+
+  // Filter and sort projects
+  const filteredProjects = useCallback(() => {
+    let result = [...projects];
+    
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      result = result.filter((p) =>
+        p.title.toLowerCase().includes(query)
+      );
+    }
+    
+    // Apply time filter
+    const now = Date.now();
+    const dayMs = 24 * 60 * 60 * 1000;
+    
+    switch (filterBy) {
+      case 'today':
+        result = result.filter((p) => now - p.updatedAt < dayMs);
+        break;
+      case 'week':
+        result = result.filter((p) => now - p.updatedAt < 7 * dayMs);
+        break;
+      case 'month':
+        result = result.filter((p) => now - p.updatedAt < 30 * dayMs);
+        break;
+    }
+    
+    // Apply sort
+    switch (sortBy) {
+      case 'date':
+        result.sort((a, b) => b.updatedAt - a.updatedAt);
+        break;
+      case 'name':
+        result.sort((a, b) => a.title.localeCompare(b.title));
+        break;
+    }
+    
+    return result;
+  }, [projects, searchQuery, filterBy, sortBy]);
+
+  // Group projects by date section
+  const groupedProjects = useCallback(() => {
+    const filtered = filteredProjects();
+    const now = Date.now();
+    const dayMs = 24 * 60 * 60 * 1000;
+    
+    const today: ProjectMetadata[] = [];
+    const yesterday: ProjectMetadata[] = [];
+    const older: ProjectMetadata[] = [];
+    
+    filtered.forEach((project) => {
+      const diff = now - project.updatedAt;
+      if (diff < dayMs) {
+        today.push(project);
+      } else if (diff < 2 * dayMs) {
+        yesterday.push(project);
+      } else {
+        older.push(project);
+      }
+    });
+    
+    return { today, yesterday, older };
+  }, [filteredProjects]);
+
+  const renderProjectItem = (project: ProjectMetadata) => {
+    const mainVideo = getMainVideo(project);
+    const isSelected = selectedProjectId === project.id;
+    
+    return (
+      <Pressable
+        key={project.id}
+        style={({ pressed }) => [
+          styles.projectItem,
+          { backgroundColor: pressed ? colors.muted : colors.card },
+        ]}
+        onPress={() => handleProjectPress(project)}
+      >
+        <View style={styles.projectContent}>
+          <View style={[styles.thumbnail, { backgroundColor: colors.muted }]}>
+            {mainVideo?.path ? (
+              <Video
+                source={{ uri: mainVideo.path }}
+                style={styles.thumbnailVideo}
+                resizeMode={ResizeMode.COVER}
+                shouldPlay={false}
+              />
+            ) : (
+              <Film size={24} color={colors.mutedForeground} />
+            )}
+          </View>
+          <View style={styles.projectDetails}>
+            <Text 
+              style={[styles.projectTitle, { color: colors.foreground }]} 
+              numberOfLines={1}
+            >
+              {project.title}
+            </Text>
+            {project.chatHistory.length > 0 && (
+              <Text 
+                style={[styles.projectPrompt, { color: colors.mutedForeground }]} 
+                numberOfLines={1}
+              >
+                Last: &quot;{project.chatHistory[project.chatHistory.length - 1].content}&quot;
+              </Text>
+            )}
+            <Text style={[styles.projectMeta, { color: colors.mutedForeground }]}>
+              {getRelativeTimeString(project.updatedAt)}
+              {mainVideo?.duration && ` · ${formatDuration(mainVideo.duration)}`}
+            </Text>
+          </View>
+        </View>
+        
+        <View style={styles.projectActions}>
+          <Pressable 
+            style={styles.moreButton}
+            onPress={() => handleMorePress(project.id)}
+          >
+            <MoreHorizontal size={20} color={colors.mutedForeground} />
+          </Pressable>
+          
+          {isSelected && (
+            <View style={[styles.actionMenu, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Pressable
+                style={styles.actionMenuItem}
+                onPress={() => handleDeleteProject(project.id)}
+              >
+                <Trash2 size={18} color={colors.destructive} />
+                <Text style={[styles.actionMenuText, { color: colors.destructive }]}>
+                  Delete
+                </Text>
+              </Pressable>
+            </View>
+          )}
+        </View>
+      </Pressable>
+    );
   };
 
-  const filteredProjects = MOCK_PROJECTS.filter((project) =>
-    project.title.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const todayProjects = filteredProjects.filter((p) => p.section === 'today');
-  const yesterdayProjects = filteredProjects.filter((p) => p.section === 'yesterday');
-  const olderProjects = filteredProjects.filter((p) => p.section === 'older');
-
-  const renderProjectItem = (project: Project) => (
-    <Pressable
-      key={project.id}
-      style={({ pressed }) => [
-        styles.projectItem,
-        { backgroundColor: colors.card, opacity: pressed ? 0.8 : 1 },
-      ]}
-      onPress={() => handleProjectPress(project)}
-    >
-      <View style={styles.projectContent}>
-        <Image
-          source={{ uri: project.thumbnail }}
-          style={[styles.thumbnail, { backgroundColor: colors.muted }]}
-          contentFit="cover"
-          transition={200}
-        />
-        <View style={styles.projectDetails}>
-          <Text style={[styles.projectTitle, { color: colors.foreground }]} numberOfLines={1}>
-            {project.title}
-          </Text>
-          <Text style={[styles.projectPrompt, { color: colors.mutedForeground }]} numberOfLines={1}>
-            Prompt: '{project.prompt}'
-          </Text>
-          <Text style={[styles.projectMeta, { color: colors.mutedForeground }]}>
-            Last edited: {project.lastEdited} · Duration: {project.duration}
-          </Text>
-        </View>
-      </View>
-      <Pressable style={styles.moreButton}>
-        <MoreHorizontal size={20} color={colors.mutedForeground} />
-      </Pressable>
-    </Pressable>
-  );
+  const { today, yesterday, older } = groupedProjects();
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { paddingTop: insets.top + Spacing.md }]}>
         <View style={styles.headerIcon}>
-          <Video size={24} color={colors.mutedForeground} />
+          <VideoIcon size={24} color={colors.mutedForeground} />
         </View>
         <Text style={[styles.headerTitle, { color: colors.foreground }]}>
           Library
         </Text>
-        <Pressable>
-          <Text style={[styles.selectButton, { color: colors.primary }]}>
-            Select
+        <View style={styles.headerRight}>
+          <Text style={[styles.projectCount, { color: colors.mutedForeground }]}>
+            {projects.length} {projects.length === 1 ? 'project' : 'projects'}
           </Text>
-        </Pressable>
+        </View>
       </View>
 
       <View style={[styles.searchContainer, { backgroundColor: colors.background }]}>
@@ -157,65 +292,113 @@ export default function LibraryScreen() {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.filterContainer}
       >
-        {FILTER_OPTIONS.map((filter) => (
+        {FILTER_OPTIONS.map((option) => (
           <Pressable
-            key={filter}
+            key={option.value}
             style={[
               styles.filterChip,
               {
-                backgroundColor: activeFilter === filter ? colors.primary : colors.muted,
+                backgroundColor: filterBy === option.value ? colors.primary : colors.muted,
+                minWidth: 60,
               },
             ]}
-            onPress={() => setActiveFilter(filter)}
+            onPress={() => setFilterBy(option.value)}
           >
             <Text
               style={[
                 styles.filterText,
                 {
-                  color: activeFilter === filter ? colors.primaryForeground : colors.foreground,
+                  color: filterBy === option.value 
+                    ? colors.primaryForeground 
+                    : colors.foreground,
                 },
               ]}
             >
-              {filter}
+              {option.label}
             </Text>
-            {filter === 'Sort by: Date' && (
-              <ChevronDown
-                size={16}
-                color={activeFilter === filter ? colors.primaryForeground : colors.foreground}
-              />
-            )}
           </Pressable>
         ))}
+        
+        <Pressable
+          style={[
+            styles.filterChip,
+            styles.sortChip,
+            { backgroundColor: colors.muted },
+          ]}
+          onPress={() => setShowSortMenu(!showSortMenu)}
+        >
+          <Text style={[styles.filterText, { color: colors.foreground }]}>
+            Sort: {SORT_OPTIONS.find((o) => o.value === sortBy)?.label}
+          </Text>
+          <ChevronDown size={16} color={colors.foreground} />
+        </Pressable>
       </ScrollView>
 
-      <ScrollView style={styles.projectList} showsVerticalScrollIndicator={false}>
-        {todayProjects.length > 0 && (
-          <>
-            <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Today</Text>
-            {todayProjects.map(renderProjectItem)}
-          </>
-        )}
+      {isLoading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      ) : filteredProjects().length === 0 ? (
+        <View style={styles.emptyState}>
+          <Film size={48} color={colors.mutedForeground} />
+          <Text style={[styles.emptyTitle, { color: colors.foreground }]}>
+            {searchQuery ? 'No Results' : 'No Projects'}
+          </Text>
+          <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
+            {searchQuery 
+              ? 'Try a different search term'
+              : 'Create a project to get started'}
+          </Text>
+        </View>
+      ) : (
+        <ScrollView 
+          style={styles.projectList} 
+          showsVerticalScrollIndicator={false}
+          onTouchStart={() => setSelectedProjectId(null)}
+        >
+          {today.length > 0 && (
+            <>
+              <Text style={[styles.sectionTitle, { color: colors.foreground }]}>
+                Today
+              </Text>
+              {today.map(renderProjectItem)}
+            </>
+          )}
 
-        {yesterdayProjects.length > 0 && (
-          <>
-            <Text style={[styles.sectionTitle, { color: colors.foreground, marginTop: Spacing.lg }]}>
-              Yesterday
-            </Text>
-            {yesterdayProjects.map(renderProjectItem)}
-          </>
-        )}
+          {yesterday.length > 0 && (
+            <>
+              <Text 
+                style={[
+                  styles.sectionTitle, 
+                  { color: colors.foreground, marginTop: today.length > 0 ? Spacing.lg : 0 }
+                ]}
+              >
+                Yesterday
+              </Text>
+              {yesterday.map(renderProjectItem)}
+            </>
+          )}
 
-        {olderProjects.length > 0 && (
-          <>
-            <Text style={[styles.sectionTitle, { color: colors.foreground, marginTop: Spacing.lg }]}>
-              Older
-            </Text>
-            {olderProjects.map(renderProjectItem)}
-          </>
-        )}
+          {older.length > 0 && (
+            <>
+              <Text 
+                style={[
+                  styles.sectionTitle, 
+                  { 
+                    color: colors.foreground, 
+                    marginTop: (today.length > 0 || yesterday.length > 0) ? Spacing.lg : 0 
+                  }
+                ]}
+              >
+                Older
+              </Text>
+              {older.map(renderProjectItem)}
+            </>
+          )}
 
-        <View style={styles.bottomPadding} />
-      </ScrollView>
+          <View style={styles.bottomPadding} />
+        </ScrollView>
+      )}
     </View>
   );
 }
@@ -242,9 +425,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: -0.3,
   },
-  selectButton: {
-    fontSize: 16,
-    fontWeight: '700',
+  headerRight: {
+    minWidth: 48,
+    alignItems: 'flex-end',
+  },
+  projectCount: {
+    fontSize: 12,
   },
   searchContainer: {
     paddingHorizontal: Spacing.lg,
@@ -267,26 +453,50 @@ const styles = StyleSheet.create({
   filterContainer: {
     paddingHorizontal: Spacing.lg,
     paddingBottom: Spacing.md,
-    gap: Spacing.md,
+    gap: Spacing.sm,
   },
   filterChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: Spacing.lg,
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
     borderRadius: BorderRadius.full,
     gap: 4,
   },
+  sortChip: {
+    marginLeft: Spacing.sm,
+  },
   filterText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '500',
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.md,
+    paddingVertical: Spacing.xxl,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  emptyText: {
+    fontSize: 14,
+    textAlign: 'center',
   },
   projectList: {
     flex: 1,
     paddingHorizontal: Spacing.lg,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
     letterSpacing: -0.3,
     paddingTop: Spacing.lg,
@@ -297,41 +507,76 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.lg,
   },
   projectContent: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: Spacing.lg,
+    gap: Spacing.md,
   },
   thumbnail: {
-    width: 112,
-    height: 70,
+    width: 100,
+    height: 64,
     borderRadius: BorderRadius.md,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  thumbnailVideo: {
+    width: '100%',
+    height: '100%',
   },
   projectDetails: {
     flex: 1,
     justifyContent: 'center',
-    gap: 4,
+    gap: 2,
   },
   projectTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '500',
   },
   projectPrompt: {
-    fontSize: 14,
+    fontSize: 13,
   },
   projectMeta: {
-    fontSize: 14,
+    fontSize: 12,
+  },
+  projectActions: {
+    position: 'relative',
   },
   moreButton: {
-    width: 28,
-    height: 28,
+    width: 36,
+    height: 36,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  actionMenu: {
+    position: 'absolute',
+    top: 36,
+    right: 0,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 4,
+    zIndex: 100,
+  },
+  actionMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  actionMenuText: {
+    fontSize: 14,
+    fontWeight: '500',
   },
   bottomPadding: {
     height: 100,
   },
 });
-

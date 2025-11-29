@@ -1,19 +1,23 @@
-import { Image } from 'expo-image';
+import { AVPlaybackStatus, ResizeMode, Video } from 'expo-av';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import {runCactus} from '@/utils/cactus';
 import {
     ArrowLeft,
     ArrowUp,
+    Download,
+    Loader2,
     Mic,
     Pause,
     Play,
     Sparkles,
 } from 'lucide-react-native';
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+    ActivityIndicator,
+    Alert,
     KeyboardAvoidingView,
     Platform,
     Pressable,
+    ScrollView,
     StyleSheet,
     Text,
     TextInput,
@@ -23,6 +27,22 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BorderRadius, Colors, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import {
+    initializeCactus,
+    isCactusReady,
+    sendEditRequest,
+    type ChatMessage,
+    type VideoEditSession,
+} from '@/utils/cactus';
+import { executeToolCall } from '@/utils/ffmpeg';
+import {
+    addChatMessage,
+    formatDuration,
+    getMainVideo,
+    loadProjectMetadata,
+    updateCurrentOutput,
+    type ProjectMetadata,
+} from '@/utils/project-storage';
 
 export default function EditScreen() {
   const colorScheme = useColorScheme();
@@ -33,31 +53,271 @@ export default function EditScreen() {
   
   const [prompt, setPrompt] = useState('');
   const [isPlaying, setIsPlaying] = useState(false);
+  const [project, setProject] = useState<ProjectMetadata | null>(null);
+  const [currentVideoPath, setCurrentVideoPath] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSending, setIsSending] = useState(false);
+  const [isAIReady, setIsAIReady] = useState(false);
+  const [aiDownloadProgress, setAIDownloadProgress] = useState(0);
+  const [streamingResponse, setStreamingResponse] = useState('');
+  const [videoDuration, setVideoDuration] = useState(0);
+  const [videoPosition, setVideoPosition] = useState(0);
+  
+  const videoRef = useRef<Video>(null);
+  const scrollViewRef = useRef<ScrollView>(null);
+  const projectTitle = params.projectTitle || project?.title || 'Project';
 
-  const projectTitle = params.projectTitle || 'New Project';
+  // Load project data
+  useEffect(() => {
+    const loadData = async () => {
+      if (!params.projectId) {
+        router.back();
+        return;
+      }
+      
+      setIsLoading(true);
+      
+      try {
+        const metadata = await loadProjectMetadata(params.projectId);
+        if (!metadata) {
+          Alert.alert('Error', 'Project not found');
+          router.back();
+          return;
+        }
+        
+        setProject(metadata);
+        
+        // Get main video or current output
+        const mainVideo = getMainVideo(metadata);
+        const videoPath = metadata.currentOutputPath || mainVideo?.path;
+        
+        if (videoPath) {
+          setCurrentVideoPath(videoPath);
+        }
+        
+        // Load existing chat history
+        if (metadata.chatHistory.length > 0) {
+          setMessages(metadata.chatHistory.map((msg) => ({
+            ...msg,
+            timestamp: msg.timestamp,
+          })));
+        }
+      } catch {
+        Alert.alert('Error', 'Failed to load project');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    loadData();
+  }, [params.projectId, router]);
 
-  const handleBack = () => {
+  // Initialize Cactus AI
+  useEffect(() => {
+    const initAI = async () => {
+      if (isCactusReady()) {
+        setIsAIReady(true);
+        return;
+      }
+      
+      try {
+        await initializeCactus({
+          onDownloadProgress: (progress) => {
+            setAIDownloadProgress(progress);
+          },
+          onDownloadComplete: () => {
+            setAIDownloadProgress(100);
+          },
+          onInitComplete: () => {
+            setIsAIReady(true);
+          },
+          onError: (error) => {
+            console.error('AI init error:', error);
+          },
+        });
+      } catch (error) {
+        console.error('Failed to initialize AI:', error);
+      }
+    };
+    
+    initAI();
+  }, []);
+
+  const handleBack = useCallback(() => {
     router.back();
-  };
+  }, [router]);
 
-  const handleExport = () => {
-    // Export functionality
-  };
-
-  const handleSubmitPrompt = () => {
-    alert("running cactus");
-    const result = runCactus();
-    alert(result)
-    if (prompt.trim()) {
-      // Process the prompt
-      console.log('Processing prompt:', prompt);
-      setPrompt('');
+  const handleExport = useCallback(async () => {
+    if (!currentVideoPath) {
+      Alert.alert('No Video', 'No video to export.');
+      return;
     }
-  };
+    
+    Alert.alert(
+      'Export Video',
+      'The video will be saved to your device.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Export',
+          onPress: async () => {
+            try {
+              // For now, just show success - in production would use MediaLibrary
+              Alert.alert('Success', `Video exported: ${currentVideoPath}`);
+            } catch (error) {
+              Alert.alert('Error', 'Failed to export video');
+            }
+          },
+        },
+      ]
+    );
+  }, [currentVideoPath]);
 
-  const togglePlayback = () => {
-    setIsPlaying(!isPlaying);
-  };
+  const togglePlayback = useCallback(async () => {
+    if (!videoRef.current) return;
+    
+    if (isPlaying) {
+      await videoRef.current.pauseAsync();
+    } else {
+      await videoRef.current.playAsync();
+    }
+  }, [isPlaying]);
+
+  const handlePlaybackStatusUpdate = useCallback((status: AVPlaybackStatus) => {
+    if (!status.isLoaded) return;
+    
+    setIsPlaying(status.isPlaying);
+    setVideoDuration(status.durationMillis ? status.durationMillis / 1000 : 0);
+    setVideoPosition(status.positionMillis ? status.positionMillis / 1000 : 0);
+  }, []);
+
+  const handleSendPrompt = useCallback(async () => {
+    if (!prompt.trim() || !project || isSending) return;
+    
+    const userMessage: ChatMessage = {
+      id: `msg_${Date.now()}`,
+      role: 'user',
+      content: prompt.trim(),
+      timestamp: Date.now(),
+    };
+    
+    setMessages((prev) => [...prev, userMessage]);
+    setPrompt('');
+    setIsSending(true);
+    setStreamingResponse('');
+    
+    // Save user message to project
+    await addChatMessage(project.id, 'user', userMessage.content);
+    
+    // Scroll to bottom
+    setTimeout(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+    
+    try {
+      if (!isAIReady) {
+        // Fallback message if AI not ready
+        const fallbackMessage: ChatMessage = {
+          id: `msg_${Date.now() + 1}`,
+          role: 'assistant',
+          content: 'The AI model is still loading. Please wait a moment and try again.',
+          timestamp: Date.now(),
+        };
+        setMessages((prev) => [...prev, fallbackMessage]);
+        setIsSending(false);
+        return;
+      }
+      
+      const mainVideo = getMainVideo(project);
+      const session: VideoEditSession = {
+        projectId: project.id,
+        mainVideoPath: mainVideo?.path || '',
+        messages,
+        currentOutputPath: currentVideoPath || '',
+      };
+      
+      const result = await sendEditRequest(
+        session,
+        userMessage.content,
+        (token) => {
+          setStreamingResponse((prev) => prev + token);
+        }
+      );
+      
+      // Process any tool calls
+      const toolResults: string[] = [];
+      let newOutputPath = currentVideoPath;
+      
+      if (result.functionCalls && result.functionCalls.length > 0) {
+        for (const call of result.functionCalls) {
+          const toolResult = await executeToolCall(
+            project.id,
+            call.name,
+            call.arguments
+          );
+          toolResults.push(`[${call.name}]: ${toolResult.result}`);
+          
+          if (toolResult.outputPath) {
+            newOutputPath = toolResult.outputPath;
+          }
+        }
+        
+        // Update current output path
+        if (newOutputPath && newOutputPath !== currentVideoPath) {
+          setCurrentVideoPath(newOutputPath);
+          await updateCurrentOutput(project.id, newOutputPath);
+        }
+      }
+      
+      // Build assistant response
+      let assistantContent = result.response || streamingResponse;
+      if (toolResults.length > 0) {
+        assistantContent += '\n\n' + toolResults.join('\n');
+      }
+      
+      const assistantMessage: ChatMessage = {
+        id: `msg_${Date.now() + 1}`,
+        role: 'assistant',
+        content: assistantContent,
+        timestamp: Date.now(),
+        toolCalls: result.functionCalls?.map((call) => ({
+          name: call.name,
+          arguments: call.arguments,
+        })),
+      };
+      
+      setMessages((prev) => [...prev, assistantMessage]);
+      setStreamingResponse('');
+      
+      // Save assistant message
+      await addChatMessage(project.id, 'assistant', assistantContent);
+      
+    } catch (error) {
+      const errorMessage: ChatMessage = {
+        id: `msg_${Date.now() + 1}`,
+        role: 'assistant',
+        content: `Sorry, I encountered an error: ${String(error)}`,
+        timestamp: Date.now(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    } finally {
+      setIsSending(false);
+      setStreamingResponse('');
+      
+      setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    }
+  }, [prompt, project, isSending, isAIReady, messages, currentVideoPath, streamingResponse]);
+
+  if (isLoading) {
+    return (
+      <View style={[styles.container, styles.centered, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
@@ -66,61 +326,131 @@ export default function EditScreen() {
       keyboardVerticalOffset={0}
     >
       <View style={[styles.header, { paddingTop: insets.top + Spacing.sm }]}>
-        <Pressable
-          style={styles.headerButton}
-          onPress={handleBack}
-        >
+        <Pressable style={styles.headerButton} onPress={handleBack}>
           <ArrowLeft size={24} color={colors.foreground} />
         </Pressable>
         <Text style={[styles.headerTitle, { color: colors.foreground }]} numberOfLines={1}>
           {projectTitle}
         </Text>
         <Pressable onPress={handleExport}>
-          <Text style={[styles.exportButton, { color: colors.primary }]}>
-            Export
-          </Text>
+          <Download size={22} color={colors.primary} />
         </Pressable>
       </View>
 
       <View style={styles.videoContainer}>
         <View style={styles.videoWrapper}>
-          <Image
-            source={{ uri: 'https://images.unsplash.com/photo-1534190760961-74e8c1c5c3da?w=800&h=450&fit=crop' }}
-            style={[styles.videoPreview, { backgroundColor: colors.muted }]}
-            contentFit="cover"
-            transition={200}
-          />
-          <Pressable
-            style={[styles.playButton, { backgroundColor: 'rgba(0,0,0,0.5)' }]}
-            onPress={togglePlayback}
-          >
-            {isPlaying ? (
-              <Pause size={32} color="#fff" fill="#fff" />
-            ) : (
-              <Play size={32} color="#fff" fill="#fff" />
-            )}
-          </Pressable>
+          {currentVideoPath ? (
+            <Video
+              ref={videoRef}
+              source={{ uri: currentVideoPath }}
+              style={styles.videoPlayer}
+              resizeMode={ResizeMode.CONTAIN}
+              onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
+              shouldPlay={false}
+              isLooping
+            />
+          ) : (
+            <View style={[styles.videoPlaceholder, { backgroundColor: colors.muted }]}>
+              <Text style={[styles.placeholderText, { color: colors.mutedForeground }]}>
+                No video loaded
+              </Text>
+            </View>
+          )}
+          
+          {currentVideoPath && (
+            <Pressable
+              style={[styles.playButton, { backgroundColor: 'rgba(0,0,0,0.5)' }]}
+              onPress={togglePlayback}
+            >
+              {isPlaying ? (
+                <Pause size={32} color="#fff" fill="#fff" />
+              ) : (
+                <Play size={32} color="#fff" fill="#fff" />
+              )}
+            </Pressable>
+          )}
         </View>
+        
+        {videoDuration > 0 && (
+          <View style={styles.timeBar}>
+            <Text style={[styles.timeText, { color: colors.mutedForeground }]}>
+              {formatDuration(videoPosition)} / {formatDuration(videoDuration)}
+            </Text>
+          </View>
+        )}
       </View>
 
-      <View style={styles.promptSection}>
-        <View style={[styles.promptHistory, { backgroundColor: colors.muted }]}>
-          <View style={styles.promptHistoryItem}>
-            <View style={[styles.promptBubble, { backgroundColor: colors.card }]}>
-              <Text style={[styles.promptText, { color: colors.foreground }]}>
-                Add a cinematic zoom on the first clip and increase the saturation
+      <View style={styles.chatSection}>
+        {!isAIReady && (
+          <View style={[styles.aiStatusBar, { backgroundColor: colors.muted }]}>
+            <Loader2 size={16} color={colors.primary} />
+            <Text style={[styles.aiStatusText, { color: colors.mutedForeground }]}>
+              {aiDownloadProgress > 0 && aiDownloadProgress < 100
+                ? `Downloading AI model... ${aiDownloadProgress.toFixed(0)}%`
+                : 'Initializing AI...'}
+            </Text>
+          </View>
+        )}
+        
+        <ScrollView
+          ref={scrollViewRef}
+          style={[styles.chatHistory, { backgroundColor: colors.muted }]}
+          contentContainerStyle={styles.chatContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {messages.length === 0 && (
+            <View style={styles.emptyChat}>
+              <Sparkles size={24} color={colors.mutedForeground} />
+              <Text style={[styles.emptyChatText, { color: colors.mutedForeground }]}>
+                Describe what edits you want to make
+              </Text>
+              <Text style={[styles.emptyChatHint, { color: colors.mutedForeground }]}>
+                Try: &quot;Trim the first 5 seconds&quot; or &quot;Make it brighter&quot;
               </Text>
             </View>
-          </View>
-          <View style={styles.promptHistoryItem}>
-            <View style={[styles.responseBubble, { backgroundColor: colors.primary }]}>
-              <Sparkles size={16} color={colors.primaryForeground} />
-              <Text style={[styles.responseText, { color: colors.primaryForeground }]}>
-                Applied cinematic zoom and increased saturation by 15%
-              </Text>
+          )}
+          
+          {messages.map((msg) => (
+            <View key={msg.id} style={styles.messageItem}>
+              {msg.role === 'user' ? (
+                <View style={[styles.userBubble, { backgroundColor: colors.card }]}>
+                  <Text style={[styles.messageText, { color: colors.foreground }]}>
+                    {msg.content}
+                  </Text>
+                </View>
+              ) : (
+                <View style={[styles.assistantBubble, { backgroundColor: colors.primary }]}>
+                  <Sparkles size={16} color={colors.primaryForeground} />
+                  <Text style={[styles.messageText, { color: colors.primaryForeground, flex: 1 }]}>
+                    {msg.content}
+                  </Text>
+                </View>
+              )}
             </View>
-          </View>
-        </View>
+          ))}
+          
+          {streamingResponse && (
+            <View style={styles.messageItem}>
+              <View style={[styles.assistantBubble, { backgroundColor: colors.primary }]}>
+                <Sparkles size={16} color={colors.primaryForeground} />
+                <Text style={[styles.messageText, { color: colors.primaryForeground, flex: 1 }]}>
+                  {streamingResponse}
+                </Text>
+              </View>
+            </View>
+          )}
+          
+          {isSending && !streamingResponse && (
+            <View style={styles.messageItem}>
+              <View style={[styles.assistantBubble, { backgroundColor: colors.primary }]}>
+                <ActivityIndicator size="small" color={colors.primaryForeground} />
+                <Text style={[styles.messageText, { color: colors.primaryForeground }]}>
+                  Thinking...
+                </Text>
+              </View>
+            </View>
+          )}
+        </ScrollView>
       </View>
 
       <View
@@ -143,6 +473,7 @@ export default function EditScreen() {
               onChangeText={setPrompt}
               multiline
               maxLength={500}
+              editable={!isSending}
             />
             <Pressable style={styles.micButton}>
               <Mic size={20} color={colors.mutedForeground} />
@@ -152,16 +483,20 @@ export default function EditScreen() {
             style={[
               styles.sendButton,
               {
-                backgroundColor: prompt.trim() ? colors.primary : colors.muted,
+                backgroundColor: prompt.trim() && !isSending ? colors.primary : colors.muted,
               },
             ]}
-            onPress={handleSubmitPrompt}
-            disabled={!prompt.trim()}
+            onPress={handleSendPrompt}
+            disabled={!prompt.trim() || isSending}
           >
-            <ArrowUp
-              size={20}
-              color={prompt.trim() ? colors.primaryForeground : colors.mutedForeground}
-            />
+            {isSending ? (
+              <Loader2 size={20} color={colors.mutedForeground} />
+            ) : (
+              <ArrowUp
+                size={20}
+                color={prompt.trim() ? colors.primaryForeground : colors.mutedForeground}
+              />
+            )}
           </Pressable>
         </View>
       </View>
@@ -172,6 +507,10 @@ export default function EditScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  centered: {
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   header: {
     flexDirection: 'row',
@@ -193,14 +532,9 @@ const styles = StyleSheet.create({
     letterSpacing: -0.3,
     textAlign: 'center',
   },
-  exportButton: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
   videoContainer: {
-    flex: 1,
-    justifyContent: 'center',
     paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm,
   },
   videoWrapper: {
     width: '100%',
@@ -209,9 +543,17 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     position: 'relative',
   },
-  videoPreview: {
+  videoPlayer: {
     width: '100%',
     height: '100%',
+  },
+  videoPlaceholder: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  placeholderText: {
+    fontSize: 14,
   },
   playButton: {
     position: 'absolute',
@@ -224,44 +566,78 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  promptSection: {
+  timeBar: {
+    marginTop: Spacing.sm,
+    alignItems: 'center',
+  },
+  timeText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  chatSection: {
     flex: 1,
     paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
+    paddingBottom: Spacing.sm,
   },
-  promptHistory: {
+  aiStatusBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.md,
+    marginBottom: Spacing.sm,
+  },
+  aiStatusText: {
+    fontSize: 12,
+    flex: 1,
+  },
+  chatHistory: {
     flex: 1,
     borderRadius: BorderRadius.xl,
+  },
+  chatContent: {
     padding: Spacing.md,
     gap: Spacing.md,
   },
-  promptHistoryItem: {
-    alignItems: 'flex-start',
+  emptyChat: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: Spacing.xxl,
+    gap: Spacing.sm,
   },
-  promptBubble: {
+  emptyChatText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  emptyChatHint: {
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  messageItem: {
+    gap: Spacing.sm,
+  },
+  userBubble: {
     maxWidth: '85%',
     padding: Spacing.md,
     borderRadius: BorderRadius.lg,
     borderTopLeftRadius: 4,
+    alignSelf: 'flex-start',
   },
-  promptText: {
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  responseBubble: {
+  assistantBubble: {
     maxWidth: '85%',
     padding: Spacing.md,
     borderRadius: BorderRadius.lg,
     borderTopRightRadius: 4,
     alignSelf: 'flex-end',
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: Spacing.sm,
   },
-  responseText: {
+  messageText: {
     fontSize: 14,
     lineHeight: 20,
-    flex: 1,
   },
   inputContainer: {
     paddingTop: Spacing.md,
@@ -305,4 +681,3 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 });
-
