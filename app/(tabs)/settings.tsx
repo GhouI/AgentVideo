@@ -168,37 +168,56 @@ export default function SettingsScreen() {
     // Show model selection
     try {
       const models = await getAvailableModels();
-      const toolModels = models.filter(m => m.supportsToolCalling);
+      const toolModels = models.filter(m => m.supportsToolCalling && !m.isDownloaded);
+      const downloadedModels = models.filter(m => m.supportsToolCalling && m.isDownloaded);
       
-      if (toolModels.length === 0) {
-        Alert.alert('Error', 'No models available for download');
+      if (downloadedModels.length > 0) {
+        Alert.alert(
+          'Model Status',
+          `Already downloaded: ${downloadedModels.map(m => m.name).join(', ')}`,
+          [
+            { text: 'Download Another', onPress: () => showModelSelection(toolModels) },
+            { text: 'OK', style: 'cancel' },
+          ]
+        );
         return;
       }
       
-      // Show selection dialog
-      Alert.alert(
-        'Select Model',
-        'Choose a model to download:',
-        [
-          ...toolModels.slice(0, 4).map(model => ({
-            text: `${model.name} (${model.sizeMb}MB)${model.isDownloaded ? ' [Downloaded]' : ''}`,
-            onPress: () => startDownload(model.name),
-          })),
-          { text: 'Cancel', style: 'cancel' as const },
-        ]
-      );
+      showModelSelection(toolModels);
     } catch (error) {
       console.error('Failed to get models:', error);
       Alert.alert('Error', 'Failed to get available models');
     }
   };
 
-  const startDownload = async (modelName: string) => {
+  const showModelSelection = (toolModels: Array<{ name: string; slug: string; sizeMb: number }>) => {
+    if (toolModels.length === 0) {
+      Alert.alert('Info', 'All models are already downloaded!');
+      return;
+    }
+    
+    // Show selection dialog with slugs
+    Alert.alert(
+      'Select Model',
+      'Choose a model to download:',
+      [
+        ...toolModels.slice(0, 4).map(model => ({
+          text: `${model.name} (${model.sizeMb}MB)`,
+          onPress: () => startDownload(model.slug, model.name),
+        })),
+        { text: 'Cancel', style: 'cancel' as const },
+      ]
+    );
+  };
+
+  const startDownload = async (modelSlug: string, modelName: string) => {
     setModelStatus('downloading');
     setModelProgress(0);
     
+    console.log('Starting download for slug:', modelSlug);
+    
     try {
-      await downloadModel(modelName, {
+      await downloadModel(modelSlug, {
         onDownloadProgress: (progress) => {
           console.log('Download progress:', progress);
           setModelProgress(progress);

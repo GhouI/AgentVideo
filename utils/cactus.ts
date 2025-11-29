@@ -494,21 +494,21 @@ export async function hasDownloadedModel(): Promise<boolean> {
   }
 }
 
-// Force download a specific model
+// Force download a specific model using its slug
 export async function downloadModel(
-  modelName?: string,
+  modelSlug?: string,
   callbacks?: CactusInitCallbacks
 ): Promise<void> {
   try {
     const tempInstance = new CactusLM();
     const models = await tempInstance.getModels();
     
-    console.log('[Cactus] Available models for download:', models.map(m => m.name));
+    console.log('[Cactus] Available models:', models.map(m => ({ name: m.name, slug: (m as any).slug })));
     
-    // Find the requested model or default to Qwen 3 1.7B or smallest
-    let targetModel = modelName 
-      ? models.find(m => m.name === modelName && m.supportsToolCalling)
-      : models.find(m => m.name === 'Qwen 3 1.7B' && m.supportsToolCalling);
+    // Find the requested model by slug or name
+    let targetModel = modelSlug 
+      ? models.find(m => (m as any).slug === modelSlug || m.name === modelSlug)
+      : models.find(m => (m as any).slug === 'qwen3-1.7' || m.name.includes('Qwen 3 1.7'));
     
     if (!targetModel) {
       // Fall back to smallest tool-calling model
@@ -520,7 +520,10 @@ export async function downloadModel(
       throw new Error('No tool-calling models available');
     }
     
-    console.log('[Cactus] Target model:', targetModel.name, '- Downloaded:', targetModel.isDownloaded);
+    // Get the slug (use slug if available, otherwise try to derive it)
+    const slug = (targetModel as any).slug || targetModel.name.toLowerCase().replace(/\s+/g, '-');
+    
+    console.log('[Cactus] Target model:', targetModel.name, 'Slug:', slug, 'Downloaded:', targetModel.isDownloaded);
     
     if (targetModel.isDownloaded) {
       console.log('[Cactus] Model already downloaded');
@@ -529,10 +532,11 @@ export async function downloadModel(
       return;
     }
     
-    // Create instance with specific model and download
-    const downloadInstance = new CactusLM({ model: targetModel.name });
+    // Create instance with model SLUG (not display name)
+    console.log('[Cactus] Creating instance with slug:', slug);
+    const downloadInstance = new CactusLM({ model: slug });
     
-    console.log('[Cactus] Starting download of:', targetModel.name);
+    console.log('[Cactus] Starting download...');
     isDownloading = true;
     callbacks?.onDownloadProgress?.(0);
     
@@ -558,9 +562,10 @@ export async function downloadModel(
   }
 }
 
-// Get list of available models
+// Get list of available models with slugs
 export async function getAvailableModels(): Promise<Array<{
   name: string;
+  slug: string;
   sizeMb: number;
   isDownloaded: boolean;
   supportsToolCalling: boolean;
@@ -570,6 +575,7 @@ export async function getAvailableModels(): Promise<Array<{
     const models = await tempInstance.getModels();
     return models.map(m => ({
       name: m.name,
+      slug: (m as any).slug || m.name.toLowerCase().replace(/\s+/g, '-'),
       sizeMb: m.sizeMb,
       isDownloaded: m.isDownloaded,
       supportsToolCalling: m.supportsToolCalling,
