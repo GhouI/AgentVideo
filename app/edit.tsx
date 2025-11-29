@@ -257,6 +257,92 @@ export default function EditScreen() {
     setVideoPosition(status.positionMillis ? status.positionMillis / 1000 : 0);
   }, []);
 
+  // Smart command parser - bypasses AI for common commands
+  const parseDirectCommand = (text: string, inputFile: string): { tool: string; args: Record<string, unknown> } | null => {
+    const lower = text.toLowerCase();
+    
+    // Trim/cut commands: "make it 5 seconds", "trim to 5 seconds", "cut to 10s", "first 5 seconds"
+    const trimMatch = lower.match(/(?:make it|trim to|cut to|first|keep first|trim first)\s*(\d+)\s*(?:seconds?|s)?/);
+    if (trimMatch) {
+      return {
+        tool: 'ffmpeg_trim',
+        args: { inputFile, outputFile: 'output/edited.mp4', startTime: '0', endTime: trimMatch[1] }
+      };
+    }
+    
+    // Trim from X to Y: "trim from 5 to 10", "cut 5-10"
+    const rangeMatch = lower.match(/(?:trim|cut)\s*(?:from\s*)?(\d+)\s*(?:to|-)\s*(\d+)/);
+    if (rangeMatch) {
+      return {
+        tool: 'ffmpeg_trim',
+        args: { inputFile, outputFile: 'output/edited.mp4', startTime: rangeMatch[1], endTime: rangeMatch[2] }
+      };
+    }
+    
+    // Brightness: "make it brighter", "increase brightness"
+    if (lower.includes('bright')) {
+      return {
+        tool: 'ffmpeg_filter',
+        args: { inputFile, outputFile: 'output/edited.mp4', filterName: 'brightness', value: 0.3 }
+      };
+    }
+    
+    // Darker
+    if (lower.includes('dark')) {
+      return {
+        tool: 'ffmpeg_filter',
+        args: { inputFile, outputFile: 'output/edited.mp4', filterName: 'brightness', value: -0.3 }
+      };
+    }
+    
+    // Grayscale/black and white
+    if (lower.includes('grayscale') || lower.includes('black and white') || lower.includes('b&w')) {
+      return {
+        tool: 'ffmpeg_filter',
+        args: { inputFile, outputFile: 'output/edited.mp4', filterName: 'grayscale' }
+      };
+    }
+    
+    // Blur
+    if (lower.includes('blur')) {
+      return {
+        tool: 'ffmpeg_filter',
+        args: { inputFile, outputFile: 'output/edited.mp4', filterName: 'blur', value: 5 }
+      };
+    }
+    
+    // Speed: "speed up", "2x speed", "make it faster"
+    const speedMatch = lower.match(/(\d+(?:\.\d+)?)\s*x\s*(?:speed|faster)/);
+    if (speedMatch) {
+      return {
+        tool: 'ffmpeg_speed',
+        args: { inputFile, outputFile: 'output/edited.mp4', speed: parseFloat(speedMatch[1]) }
+      };
+    }
+    if (lower.includes('speed up') || lower.includes('faster')) {
+      return {
+        tool: 'ffmpeg_speed',
+        args: { inputFile, outputFile: 'output/edited.mp4', speed: 2 }
+      };
+    }
+    if (lower.includes('slow') || lower.includes('slower')) {
+      return {
+        tool: 'ffmpeg_speed',
+        args: { inputFile, outputFile: 'output/edited.mp4', speed: 0.5 }
+      };
+    }
+    
+    // Mute
+    if (lower.includes('mute') || lower.includes('remove audio') || lower.includes('no sound')) {
+      return {
+        tool: 'ffmpeg_audio',
+        args: { inputFile, outputFile: 'output/edited.mp4', action: 'mute' }
+      };
+    }
+    
+    return null; // Let AI handle it
+  };
+
   const handleSendPrompt = useCallback(async () => {
     if (!prompt.trim() || !project || isSending) return;
     
@@ -281,12 +367,50 @@ export default function EditScreen() {
     }, 100);
     
     try {
+      const mainVideo = getMainVideo(project);
+      const inputFile = mainVideo?.remotePath || `input/${mainVideo?.path?.split('/').pop()}` || '';
+      
+      // Try smart command parsing first (bypasses slow AI)
+      const directCommand = parseDirectCommand(userMessage.content, inputFile);
+      
+      if (directCommand) {
+        console.log('[Edit] Direct command detected:', directCommand.tool, directCommand.args);
+        
+        const toolResult = await executeToolCall(project.id, directCommand.tool, directCommand.args);
+        console.log('[Edit] Direct command result:', toolResult);
+        
+        let assistantContent = '';
+        if (toolResult.success) {
+          assistantContent = `Done! Applied ${directCommand.tool.replace('ffmpeg_', '')} to your video.`;
+          if (toolResult.outputUrl) {
+            setCurrentVideoPath(toolResult.outputUrl);
+          }
+          if (toolResult.outputPath) {
+            await updateCurrentOutput(project.id, toolResult.outputPath);
+            setProject((prev) => (prev ? { ...prev, currentOutputPath: toolResult.outputPath! } : prev));
+          }
+        } else {
+          assistantContent = `Error: ${toolResult.result}`;
+        }
+        
+        const assistantMessage: ChatMessage = {
+          id: `msg_${Date.now() + 1}`,
+          role: 'assistant',
+          content: assistantContent,
+          timestamp: Date.now(),
+        };
+        setMessages((prev) => [...prev, assistantMessage]);
+        await addChatMessage(project.id, 'assistant', assistantContent);
+        setIsSending(false);
+        return;
+      }
+      
+      // Fall back to AI if no direct command matched
       if (!isAIReady) {
-        // Fallback message if AI not ready
         const fallbackMessage: ChatMessage = {
           id: `msg_${Date.now() + 1}`,
           role: 'assistant',
-          content: 'The AI model is still loading. Please wait a moment and try again.',
+          content: 'The AI model is still loading. Try simple commands like "make it 5 seconds" or "make it brighter".',
           timestamp: Date.now(),
         };
         setMessages((prev) => [...prev, fallbackMessage]);
@@ -294,7 +418,6 @@ export default function EditScreen() {
         return;
       }
       
-      const mainVideo = getMainVideo(project);
       const session: VideoEditSession = {
         projectId: project.id,
         mainVideoPath:
