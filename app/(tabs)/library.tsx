@@ -104,7 +104,7 @@ export default function LibraryScreen() {
               await deleteProject(projectId);
               setProjects((prev) => prev.filter((p) => p.id !== projectId));
               setSelectedProjectId(null);
-            } catch (error) {
+            } catch {
               Alert.alert('Error', 'Failed to delete project');
             }
           },

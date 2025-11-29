@@ -478,6 +478,21 @@ export function getCactusDownloadProgress(): number {
   return downloadProgress;
 }
 
+export async function hasDownloadedModel(): Promise<boolean> {
+  try {
+    if (!cactusInstance) {
+      cactusInstance = new CactusLM();
+    }
+
+    const models = await cactusInstance.getModels();
+    const toolCallingModels = models.filter((m) => m.supportsToolCalling);
+    return toolCallingModels.some((m) => m.isDownloaded);
+  } catch (error) {
+    console.error('Failed to check model availability', error);
+    return false;
+  }
+}
+
 export function isCactusDownloading(): boolean {
   return isDownloading;
 }

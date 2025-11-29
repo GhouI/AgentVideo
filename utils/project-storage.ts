@@ -1,4 +1,5 @@
 import { Paths, Directory, File } from 'expo-file-system';
+import { ensureBackendProject, uploadFileToBackend } from './backend';
 
 // Base directory for all projects using the new expo-file-system API  
 const PROJECTS_DIR = Paths.document.uri + 'projects/';
@@ -79,6 +80,8 @@ export interface ProjectFile {
   duration?: number; // in seconds
   width?: number;
   height?: number;
+  remotePath?: string;
+  remoteUrl?: string;
 }
 
 export interface ProjectMetadata {
@@ -128,6 +131,7 @@ export async function createProject(title: string): Promise<ProjectMetadata> {
     chatHistory: [],
   };
   
+  await ensureBackendProject(projectId, title);
   // Save metadata
   await saveProjectMetadata(metadata);
   
@@ -218,6 +222,7 @@ export async function addFileToProject(
   if (!metadata) {
     throw new Error(`Project ${projectId} not found`);
   }
+  await ensureBackendProject(projectId, metadata.title);
   
   const fileId = `file_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
   const extension = fileName.split('.').pop() || 'mp4';
@@ -240,6 +245,11 @@ export async function addFileToProject(
     size: (fileInfo as { size?: number }).size || 0,
     addedAt: Date.now(),
   };
+
+  // Upload to backend so FFmpeg can process server-side
+  const uploadResult = await uploadFileToBackend(projectId, targetPath, fileName, fileType);
+  projectFile.remotePath = uploadResult.remotePath;
+  projectFile.remoteUrl = uploadResult.remoteUrl;
   
   // Add to metadata
   metadata.files.push(projectFile);
@@ -268,7 +278,7 @@ export async function setMainVideo(projectId: string, fileId: string): Promise<v
   // Set initial output path to main video
   const mainFile = metadata.files.find(f => f.id === fileId);
   if (mainFile) {
-    metadata.currentOutputPath = mainFile.path;
+    metadata.currentOutputPath = mainFile.remotePath || mainFile.remoteUrl || mainFile.path;
   }
   
   await saveProjectMetadata(metadata);

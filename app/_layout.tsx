@@ -5,12 +5,13 @@ import 'react-native-reanimated';
 
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { SettingsProvider } from '@/providers/settings-provider';
 
 export const unstable_settings = {
   anchor: '(tabs)',
 };
 
-export default function RootLayout() {
+function NavigationLayout() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
 
@@ -52,7 +53,15 @@ export default function RootLayout() {
         />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
       </Stack>
-      <StatusBar style="auto" />
+      <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
     </ThemeProvider>
+  );
+}
+
+export default function RootLayout() {
+  return (
+    <SettingsProvider>
+      <NavigationLayout />
+    </SettingsProvider>
   );
 }

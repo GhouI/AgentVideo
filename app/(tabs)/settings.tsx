@@ -2,16 +2,19 @@ import {
   Bell,
   ChevronRight,
   CircleHelp,
+  Download,
   FileText,
   Globe,
   LogOut,
   Moon,
-  Palette,
+  SunMedium,
   Shield,
   User,
 } from 'lucide-react-native';
 import React from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -23,6 +26,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, BorderRadius, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useAppSettings } from '@/providers/settings-provider';
+import {
+  getCactusDownloadProgress,
+  hasDownloadedModel,
+  initializeCactus,
+  isCactusDownloading,
+  isCactusReady,
+} from '@/utils/cactus';
 
 interface SettingItem {
   id: string;
@@ -33,12 +44,50 @@ interface SettingItem {
   value?: boolean;
 }
 
+type ModelStatus = 'idle' | 'checking' | 'downloading' | 'ready' | 'error';
+
 export default function SettingsScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const insets = useSafeAreaInsets();
-  const [darkMode, setDarkMode] = React.useState(colorScheme === 'dark');
-  const [notifications, setNotifications] = React.useState(true);
+  const { theme, setTheme, notificationsEnabled, setNotificationsEnabled } = useAppSettings();
+  const [modelStatus, setModelStatus] = React.useState<ModelStatus>('checking');
+  const [modelProgress, setModelProgress] = React.useState(0);
+
+  React.useEffect(() => {
+    let isActive = true;
+    const checkModel = async () => {
+      try {
+        if (isCactusDownloading()) {
+          if (!isActive) return;
+          setModelStatus('downloading');
+          setModelProgress(getCactusDownloadProgress());
+          return;
+        }
+
+        if (isCactusReady()) {
+          if (!isActive) return;
+          setModelStatus('ready');
+          setModelProgress(100);
+          return;
+        }
+
+        const downloaded = await hasDownloadedModel();
+        if (!isActive) return;
+        setModelStatus(downloaded ? 'ready' : 'idle');
+        setModelProgress(downloaded ? 100 : 0);
+      } catch {
+        if (isActive) {
+          setModelStatus('error');
+        }
+      }
+    };
+
+    checkModel();
+    return () => {
+      isActive = false;
+    };
+  }, []);
 
   const accountSettings: SettingItem[] = [
     {
@@ -59,25 +108,30 @@ export default function SettingsScreen() {
 
   const appSettings: SettingItem[] = [
     {
-      id: 'appearance',
-      icon: <Palette size={22} color={colors.secondary} />,
-      title: 'Appearance',
-      subtitle: 'Customize the look and feel',
-      type: 'navigate',
-    },
-    {
       id: 'darkMode',
-      icon: <Moon size={22} color={colors.secondary} />,
-      title: 'Dark Mode',
+      icon: theme === 'dark' ? (
+        <Moon size={22} color={colors.secondary} />
+      ) : (
+        <SunMedium size={22} color={colors.secondary} />
+      ),
+      title: theme === 'dark' ? 'Dark Mode' : 'Light Mode',
+      subtitle: theme === 'dark' ? 'Reduce brightness for low light' : 'Use a bright interface',
       type: 'toggle',
-      value: darkMode,
+      value: theme === 'dark',
     },
     {
       id: 'notifications',
       icon: <Bell size={22} color={colors.secondary} />,
       title: 'Notifications',
       type: 'toggle',
-      value: notifications,
+      value: notificationsEnabled,
+    },
+    {
+      id: 'downloadModel',
+      icon: <Download size={22} color={colors.secondary} />,
+      title: 'Download Model',
+      subtitle: 'Install the AI model for local editing',
+      type: 'action',
     },
     {
       id: 'language',
@@ -109,13 +163,57 @@ export default function SettingsScreen() {
     },
   ];
 
-  const handleToggle = (id: string) => {
+  const handleToggle = async (id: string) => {
     if (id === 'darkMode') {
-      setDarkMode(!darkMode);
+      await setTheme(theme === 'dark' ? 'light' : 'dark');
     } else if (id === 'notifications') {
-      setNotifications(!notifications);
+      await setNotificationsEnabled(!notificationsEnabled);
     }
   };
+
+  const handleDownloadModel = async () => {
+    if (modelStatus === 'downloading') return;
+    setModelStatus('downloading');
+
+    try {
+      await initializeCactus({
+        onDownloadProgress: (progress) => setModelProgress(progress),
+        onDownloadComplete: () => setModelProgress(100),
+        onInitComplete: () => setModelStatus('ready'),
+        onError: () => setModelStatus('error'),
+      });
+      setModelStatus('ready');
+      setModelProgress(100);
+      Alert.alert('Model ready', 'The AI model has been downloaded.');
+    } catch {
+      setModelStatus('error');
+      Alert.alert('Download failed', 'Unable to download the model. Please try again.');
+    }
+  };
+
+  const handleAction = async (id: string) => {
+    if (id === 'downloadModel') {
+      await handleDownloadModel();
+    } else if (id === 'logout') {
+      Alert.alert('Log Out', 'Logging out is not implemented yet.');
+    }
+  };
+
+  const modelStatusLabel = React.useMemo(() => {
+    if (modelStatus === 'downloading') {
+      return `Downloading ${Math.round(modelProgress)}%`;
+    }
+    if (modelStatus === 'ready') {
+      return 'Ready';
+    }
+    if (modelStatus === 'error') {
+      return 'Error';
+    }
+    if (modelStatus === 'checking') {
+      return 'Checking...';
+    }
+    return 'Not downloaded';
+  }, [modelProgress, modelStatus]);
 
   const renderSettingItem = (item: SettingItem) => (
     <Pressable
@@ -124,7 +222,13 @@ export default function SettingsScreen() {
         styles.settingItem,
         { backgroundColor: pressed ? colors.muted : colors.card },
       ]}
-      onPress={() => item.type === 'toggle' && handleToggle(item.id)}
+      onPress={() => {
+        if (item.type === 'toggle') {
+          handleToggle(item.id);
+        } else if (item.type === 'action') {
+          handleAction(item.id);
+        }
+      }}
     >
       <View style={[styles.settingIcon, { backgroundColor: colors.muted }]}>
         {item.icon}
@@ -144,6 +248,17 @@ export default function SettingsScreen() {
           </Text>
         )}
       </View>
+      {item.id === 'downloadModel' && (
+        <View style={styles.statusPill}>
+          {modelStatus === 'downloading' ? (
+            <ActivityIndicator size="small" color={colors.primary} />
+          ) : (
+            <Text style={[styles.statusText, { color: colors.mutedForeground }]}>
+              {modelStatusLabel}
+            </Text>
+          )}
+        </View>
+      )}
       {item.type === 'navigate' && (
         <ChevronRight size={20} color={colors.mutedForeground} />
       )}
@@ -268,6 +383,16 @@ const styles = StyleSheet.create({
   },
   settingSubtitle: {
     fontSize: 14,
+  },
+  statusPill: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 6,
+    borderRadius: BorderRadius.full,
+    backgroundColor: 'transparent',
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
   versionContainer: {
     alignItems: 'center',

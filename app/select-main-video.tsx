@@ -74,7 +74,11 @@ export default function SelectMainVideoScreen() {
         const videosWithInfo: VideoFileWithInfo[] = [];
         
         for (const video of videoFiles) {
-          const info = await getVideoInfo(video.path);
+          const info = await getVideoInfo(metadata.id, {
+            remotePath: video.remotePath,
+            remoteUrl: video.remoteUrl,
+            path: video.path,
+          });
           videosWithInfo.push({
             ...video,
             durationSeconds: info?.duration,

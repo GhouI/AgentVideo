@@ -34,6 +34,7 @@ import {
     type ChatMessage,
     type VideoEditSession,
 } from '@/utils/cactus';
+import { BACKEND_BASE_URL } from '@/utils/backend';
 import { executeToolCall } from '@/utils/ffmpeg';
 import {
     addChatMessage,
@@ -43,6 +44,7 @@ import {
     updateCurrentOutput,
     type ProjectMetadata,
 } from '@/utils/project-storage';
+import { useAppSettings } from '@/providers/settings-provider';
 
 export default function EditScreen() {
   const colorScheme = useColorScheme();
@@ -50,6 +52,7 @@ export default function EditScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const params = useLocalSearchParams<{ projectId: string; projectTitle: string }>();
+  const { sendProcessingCompleteNotification } = useAppSettings();
   
   const [prompt, setPrompt] = useState('');
   const [isPlaying, setIsPlaying] = useState(false);
@@ -63,6 +66,7 @@ export default function EditScreen() {
   const [streamingResponse, setStreamingResponse] = useState('');
   const [videoDuration, setVideoDuration] = useState(0);
   const [videoPosition, setVideoPosition] = useState(0);
+  const [lastNotifiedOutput, setLastNotifiedOutput] = useState<string | null>(null);
   
   const videoRef = useRef<Video>(null);
   const scrollViewRef = useRef<ScrollView>(null);
@@ -87,10 +91,20 @@ export default function EditScreen() {
         }
         
         setProject(metadata);
+        setLastNotifiedOutput(metadata.currentOutputPath ?? null);
         
         // Get main video or current output
         const mainVideo = getMainVideo(metadata);
-        const videoPath = metadata.currentOutputPath || mainVideo?.path;
+        const resolvePlayback = (path?: string | null) => {
+          if (!path) return null;
+          if (path.startsWith('http') || path.startsWith('file://')) return path;
+          return `${BACKEND_BASE_URL}/files/${metadata.id}/${path.replace(/^\/+/, '')}`;
+        };
+        const videoPath =
+          resolvePlayback(metadata.currentOutputPath) ||
+          mainVideo?.remoteUrl ||
+          resolvePlayback(mainVideo?.remotePath) ||
+          mainVideo?.path;
         
         if (videoPath) {
           setCurrentVideoPath(videoPath);
@@ -165,7 +179,7 @@ export default function EditScreen() {
             try {
               // For now, just show success - in production would use MediaLibrary
               Alert.alert('Success', `Video exported: ${currentVideoPath}`);
-            } catch (error) {
+            } catch {
               Alert.alert('Error', 'Failed to export video');
             }
           },
@@ -232,9 +246,10 @@ export default function EditScreen() {
       const mainVideo = getMainVideo(project);
       const session: VideoEditSession = {
         projectId: project.id,
-        mainVideoPath: mainVideo?.path || '',
+        mainVideoPath:
+          mainVideo?.remotePath || mainVideo?.remoteUrl || mainVideo?.path || '',
         messages,
-        currentOutputPath: currentVideoPath || '',
+        currentOutputPath: project.currentOutputPath || '',
       };
       
       const result = await sendEditRequest(
@@ -247,7 +262,15 @@ export default function EditScreen() {
       
       // Process any tool calls
       const toolResults: string[] = [];
-      let newOutputPath = currentVideoPath;
+      let newOutputPath = project.currentOutputPath || null;
+      let newPlaybackPath = currentVideoPath;
+      let outputWasUpdated = false;
+      const toPlaybackUrl = (path?: string | null): string | null => {
+        if (!path) return null;
+        if (path.startsWith('http')) return path;
+        if (path.startsWith('file://')) return path;
+        return `${BACKEND_BASE_URL}/files/${project.id}/${path.replace(/^\/+/, '')}`;
+      };
       
       if (result.functionCalls && result.functionCalls.length > 0) {
         for (const call of result.functionCalls) {
@@ -258,15 +281,32 @@ export default function EditScreen() {
           );
           toolResults.push(`[${call.name}]: ${toolResult.result}`);
           
+          const candidatePlayback = toPlaybackUrl(toolResult.outputUrl || toolResult.outputPath);
           if (toolResult.outputPath) {
             newOutputPath = toolResult.outputPath;
+            outputWasUpdated = toolResult.success || outputWasUpdated;
+          }
+          if (candidatePlayback) {
+            newPlaybackPath = candidatePlayback;
           }
         }
         
         // Update current output path
-        if (newOutputPath && newOutputPath !== currentVideoPath) {
-          setCurrentVideoPath(newOutputPath);
+        if (newPlaybackPath && newPlaybackPath !== currentVideoPath) {
+          setCurrentVideoPath(newPlaybackPath);
+        }
+        if (newOutputPath && newOutputPath !== project.currentOutputPath) {
           await updateCurrentOutput(project.id, newOutputPath);
+          setProject((prev) => (prev ? { ...prev, currentOutputPath: newOutputPath } : prev));
+          setLastNotifiedOutput(newOutputPath);
+
+          if (outputWasUpdated && newOutputPath !== lastNotifiedOutput) {
+            try {
+              await sendProcessingCompleteNotification(projectTitle);
+            } catch (notifyError) {
+              console.warn('Failed to send notification', notifyError);
+            }
+          }
         }
       }
       
@@ -309,7 +349,18 @@ export default function EditScreen() {
         scrollViewRef.current?.scrollToEnd({ animated: true });
       }, 100);
     }
-  }, [prompt, project, isSending, isAIReady, messages, currentVideoPath, streamingResponse]);
+  }, [
+    prompt,
+    project,
+    isSending,
+    isAIReady,
+    messages,
+    currentVideoPath,
+    streamingResponse,
+    sendProcessingCompleteNotification,
+    projectTitle,
+    lastNotifiedOutput,
+  ]);
 
   if (isLoading) {
     return (
